@@ -35,6 +35,7 @@ export default function App() {
   
   // Clothing upload image preview state
   const [clothImageBytes, setClothImageBytes] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState('');
 
   // Local mirror snap indicators
   const [wardrobeStyle, setWardrobeStyle] = useState<'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null>(null);
