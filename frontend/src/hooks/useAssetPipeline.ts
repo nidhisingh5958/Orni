@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
-import { ParsedIntent } from '../lib/intentTypes';
+import type { ParsedIntent } from '../lib/intentTypes';
 
 export function useAssetPipeline() {
   const [activeAssetId, setActiveAssetId] = useState<string | null>(null);

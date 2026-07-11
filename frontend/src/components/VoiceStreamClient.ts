@@ -1,5 +1,5 @@
 import { fetchEphemeralToken } from '../lib/ephemeralToken';
-import { ParsedIntent } from '../lib/intentTypes';
+import type { ParsedIntent } from '../lib/intentTypes';
 
 export class VoiceStreamClient {
   private socket: WebSocket | null = null;

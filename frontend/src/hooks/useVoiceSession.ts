@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { VoiceStreamClient } from '../components/VoiceStreamClient';
-import { ParsedIntent } from '../lib/intentTypes';
+import type { ParsedIntent } from '../lib/intentTypes';
 
 export function useVoiceSession(callbacks: {
   onIntent: (intent: ParsedIntent) => void;
