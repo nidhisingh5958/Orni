@@ -1,6 +1,5 @@
 package com.orni.app.wardrobe.ui
 
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -70,7 +69,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.orni.app.wardrobe.WardrobeUiState
 import com.orni.app.wardrobe.WardrobeViewModel
-import com.orni.app.wardrobe.util.base64ToByteArray
+import com.orni.app.wardrobe.util.base64ToBitmapOrNull
 import com.orni.app.wardrobe.util.readBytes
 import com.orni.app.wardrobe.util.toBase64
 
@@ -257,14 +256,17 @@ private fun WardrobePreview(
         ) { state ->
             when (state) {
                 is WardrobeUiState.Success -> {
-                    val bytes = remember(state.resultImageBase64) { state.resultImageBase64.base64ToByteArray() }
-                    val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Try-on result",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    val bitmap = remember(state.resultImageBase64) { state.resultImageBase64.base64ToBitmapOrNull() }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Try-on result",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        DecodeFailureState()
+                    }
                 }
 
                 is WardrobeUiState.GeneratingGarment, is WardrobeUiState.ApplyingGarment -> {
@@ -311,6 +313,31 @@ private fun WardrobePreview(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DecodeFailureState() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            Icons.Filled.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "Image returned but could not be decoded.",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

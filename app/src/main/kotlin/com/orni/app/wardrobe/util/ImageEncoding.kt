@@ -12,9 +12,16 @@ fun Uri.readBytes(contentResolver: ContentResolver): ByteArray =
 
 fun ByteArray.toBase64(): String = Base64.encodeToString(this, Base64.NO_WRAP)
 
-fun String.base64ToByteArray(): ByteArray = Base64.decode(this, Base64.NO_WRAP)
+fun String.base64ToByteArray(): ByteArray {
+    val payload = trim().substringAfter("base64,", trim())
+    return Base64.decode(payload, Base64.DEFAULT)
+}
+
+fun String.base64ToBitmapOrNull(): Bitmap? {
+    val bytes = runCatching { base64ToByteArray() }.getOrNull() ?: return null
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+}
 
 fun String.base64ToBitmap(): Bitmap {
-    val bytes = base64ToByteArray()
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    return base64ToBitmapOrNull() ?: error("Unable to decode base64 image")
 }
