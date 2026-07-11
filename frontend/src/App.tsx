@@ -42,8 +42,6 @@ export default function App() {
   // Dynamic mirror overlays
   const [wardrobeStyle, setWardrobeStyle] = useState<'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null>(null);
   const [activeFilter, setActiveFilter] = useState<'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null>(null);
-  // Track whether videoSrc is a real video (Veo MP4) or a still image (Imagen/Gemini)
-  const [isVideoOutput, setIsVideoOutput] = useState(false);
 
   // Connect Theme state to document element attributes
   useEffect(() => {
