@@ -20,7 +20,6 @@ class AdViewModel(
     private val _uiState = MutableStateFlow<AdUiState>(AdUiState.Listening)
     val uiState: StateFlow<AdUiState> = _uiState.asStateFlow()
 
-    // Waveform amplitude for the listening indicator (0f–1f)
     private val _amplitude = MutableStateFlow(0f)
     val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
 
@@ -28,15 +27,17 @@ class AdViewModel(
     private var micJob: Job? = null
     private var generationJob: Job? = null
     private var intentDebounceJob: Job? = null
-
     private var liveSession: GeminiLiveSession? = null
+
+    // The last successfully generated image — needed for animate/localize chaining.
+    private var lastImageBase64: String? = null
     private var stableIntent: AdIntent? = null
+    private var pendingIntent: AdIntent? = null
 
     // ---------------------------------------------------------------------------
     // Session lifecycle
     // ---------------------------------------------------------------------------
 
-    /** Call once the RECORD_AUDIO permission is confirmed. */
     fun startSession() {
         if (sessionJob?.isActive == true) return
         sessionJob = viewModelScope.launch { openSessionWithRetry() }
@@ -63,30 +64,28 @@ class AdViewModel(
 
     private suspend fun openSessionWithRetry(attempt: Int = 0) {
         val tokenResult = repository.mintEphemeralToken()
-        tokenResult.onFailure { err ->
-            Log.e(TAG, "Token mint failed: ${err.message}")
+        tokenResult.onFailure {
+            Log.e(TAG, "Token mint failed: ${it.message}")
             _uiState.value = AdUiState.Error("Could not connect — check your network", canRetry = true)
             return
         }
         val tokenData = tokenResult.getOrThrow()
-
         val session = GeminiLiveSession(tokenData.websocketUrl, tokenData.token)
         liveSession = session
-
         _uiState.value = AdUiState.Listening
         startMicCapture(session)
 
         session.events().collect { event ->
             when (event) {
-                is GeminiLiveSession.SessionEvent.Transcript -> onTranscript(event.text, intent = null)
-                is GeminiLiveSession.SessionEvent.IntentUpdate -> onTranscript(
-                    transcript = event.intent.product,
-                    intent = event.intent,
-                )
-                GeminiLiveSession.SessionEvent.Disconnected -> {
+                is GeminiLiveSession.SessionEvent.Transcript    -> onPartialTranscript(event.text)
+                is GeminiLiveSession.SessionEvent.IntentUpdate  -> onIntentUpdate(event.intent)
+                GeminiLiveSession.SessionEvent.TurnComplete     -> {
+                    intentDebounceJob?.cancel()
+                    pendingIntent?.let { lockAndGenerate(it) }
+                }
+                GeminiLiveSession.SessionEvent.Disconnected     -> {
                     micJob?.cancel()
                     liveSession = null
-                    // Auto-reconnect with exponential back-off, cap at 3 attempts
                     if (attempt < 3) {
                         delay(1_000L * (attempt + 1))
                         openSessionWithRetry(attempt + 1)
@@ -107,45 +106,74 @@ class AdViewModel(
         micJob = viewModelScope.launch {
             MicAudioSource.pcmFlow().collect { chunk ->
                 session.sendAudioChunk(chunk)
-                // Derive a rough amplitude from the RMS of the chunk for the waveform UI
                 _amplitude.value = chunk.rms()
             }
         }
     }
 
     // ---------------------------------------------------------------------------
-    // Intent handling + interruption logic
+    // Intent handling
     // ---------------------------------------------------------------------------
 
-    /**
-     * Called on every transcript/intent update from the WebSocket.
-     *
-     * Interruption rule: if a generation is in flight (or just completed) and
-     * new speech arrives, cancel the in-flight job and supersede with the merged
-     * intent — never queue behind it.
-     */
-    private fun onTranscript(transcript: String, intent: AdIntent?) {
-        val merged = if (intent != null) {
-            val existing = stableIntent
-            if (existing != null) existing.mergeWith(intent) else intent
-        } else null
+    private fun onPartialTranscript(text: String) {
+        // Interrupt: cancel in-flight generation immediately (supersede, don't queue)
+        if (generationJob?.isActive == true) {
+            generationJob?.cancel()
+            Log.d(TAG, "Generation superseded by new speech")
+        }
+        _uiState.value = AdUiState.IntentStabilizing(text, pendingIntent)
+    }
 
-        _uiState.value = AdUiState.IntentStabilizing(transcript, merged)
+    private fun onIntentUpdate(intent: AdIntent) {
+        val merged = when (intent.action) {
+            AdIntent.Action.Edit -> stableIntent?.mergeWith(intent) ?: intent
+            else -> intent
+        }
+        pendingIntent = merged
+        _uiState.value = AdUiState.IntentStabilizing(merged.product.ifBlank { merged.motion ?: "" }, merged)
 
-        // Debounce: wait 800 ms of silence before treating intent as stable.
-        // If new speech arrives before the debounce fires, the old debounce is
-        // cancelled — this is the interruption mechanism for mid-sentence corrections.
         intentDebounceJob?.cancel()
-        if (merged != null && merged.isActionable) {
-            intentDebounceJob = viewModelScope.launch {
-                delay(INTENT_DEBOUNCE_MS)
-                triggerGeneration(merged)
-            }
+        intentDebounceJob = viewModelScope.launch {
+            delay(INTENT_DEBOUNCE_MS)
+            lockAndGenerate(merged)
         }
     }
 
-    private fun triggerGeneration(intent: AdIntent) {
-        // Cancel any in-flight generation — the new intent supersedes it.
+    private fun lockAndGenerate(intent: AdIntent) {
+        intentDebounceJob?.cancel()
+        pendingIntent = null
+        route(intent)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Routing — mirrors reference repo's handle_utterance action dispatch
+    // ---------------------------------------------------------------------------
+
+    private fun route(intent: AdIntent) {
+        // Interrupt: cancel whatever is running
+        if (intent.interrupt) generationJob?.cancel()
+
+        when (intent.action) {
+            AdIntent.Action.Create, AdIntent.Action.Edit -> triggerGenerate(intent)
+            AdIntent.Action.Animate  -> triggerAnimate(intent)
+            AdIntent.Action.Localize -> triggerLocalize(intent)
+            AdIntent.Action.Wardrobe -> triggerGenerate(intent) // wardrobe falls through to image gen
+            AdIntent.Action.Unknown  -> { /* not enough info yet */ }
+        }
+    }
+
+    fun retry() {
+        when {
+            _uiState.value is AdUiState.Error -> startSession()
+            stableIntent != null -> route(stableIntent!!)
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Create / Edit — NB2 Lite image generation
+    // ---------------------------------------------------------------------------
+
+    private fun triggerGenerate(intent: AdIntent) {
         generationJob?.cancel()
         stableIntent = intent
         _uiState.value = AdUiState.Generating(intent)
@@ -153,20 +181,72 @@ class AdViewModel(
         generationJob = viewModelScope.launch {
             repository.generateAd(intent)
                 .onSuccess { imageBase64 ->
+                    lastImageBase64 = imageBase64
                     _uiState.value = AdUiState.Success(imageBase64, intent)
                 }
-                .onFailure { err ->
-                    Log.e(TAG, "Generation failed: ${err.message}")
-                    _uiState.value = AdUiState.Error(err.message ?: "Generation failed")
+                .onFailure {
+                    Log.e(TAG, "Generate failed: ${it.message}")
+                    _uiState.value = AdUiState.Error(it.message ?: "Generation failed")
                 }
         }
     }
 
-    fun retry() {
-        val current = _uiState.value
-        when {
-            current is AdUiState.Error -> startSession()
-            stableIntent != null -> triggerGeneration(stableIntent!!)
+    // ---------------------------------------------------------------------------
+    // Animate — Omni Flash video + optional TTS voiceover
+    // ---------------------------------------------------------------------------
+
+    private fun triggerAnimate(intent: AdIntent) {
+        val imageBase64 = lastImageBase64 ?: run {
+            // No anchor frame yet — generate one first, then animate
+            triggerGenerate(intent.copy(action = AdIntent.Action.Create))
+            return
+        }
+        generationJob?.cancel()
+        stableIntent = intent
+        _uiState.value = AdUiState.Animating(intent)
+
+        generationJob = viewModelScope.launch {
+            repository.animateAd(imageBase64, intent)
+                .onSuccess { (videoBase64, audioBase64) ->
+                    // Play TTS voiceover if the backend returned one
+                    // (audio playback is handled in the UI layer via the state)
+                    _uiState.value = AdUiState.Success(
+                        imageBase64 = imageBase64,
+                        intent = intent,
+                        videoBase64 = videoBase64,
+                    )
+                    // audioBase64 is surfaced via a separate event if needed — keep state simple
+                }
+                .onFailure {
+                    Log.e(TAG, "Animate failed: ${it.message}")
+                    _uiState.value = AdUiState.Error(it.message ?: "Animation failed")
+                }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Localize — instant text-overlay swap, no image re-render
+    // ---------------------------------------------------------------------------
+
+    private fun triggerLocalize(intent: AdIntent) {
+        val lang = intent.language ?: return
+        val copyText = stableIntent?.copyText ?: return
+        val currentSuccess = _uiState.value as? AdUiState.Success ?: return
+
+        generationJob?.cancel()
+        _uiState.value = AdUiState.Localizing(lang)
+
+        generationJob = viewModelScope.launch {
+            repository.localizeAd(copyText, lang)
+                .onSuccess { translated ->
+                    // KEY: only the overlay text changes — image stays identical.
+                    // Mirrors the reference repo's overlay_update message.
+                    _uiState.value = currentSuccess.copy(overlayText = translated)
+                }
+                .onFailure {
+                    Log.e(TAG, "Localize failed: ${it.message}")
+                    _uiState.value = AdUiState.Error(it.message ?: "Localization failed")
+                }
         }
     }
 
@@ -174,7 +254,6 @@ class AdViewModel(
     // Helpers
     // ---------------------------------------------------------------------------
 
-    /** Root-mean-square amplitude of a 16-bit PCM byte array, normalised to 0–1. */
     private fun ByteArray.rms(): Float {
         if (isEmpty()) return 0f
         var sum = 0.0

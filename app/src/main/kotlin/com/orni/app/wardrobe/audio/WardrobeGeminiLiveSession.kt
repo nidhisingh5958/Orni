@@ -60,7 +60,7 @@ class WardrobeGeminiLiveSession(
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WS failure: ${t.message}")
                 trySend(SessionEvent.Disconnected)
-                close(t)
+                close() // do NOT rethrow — avoids crashing the process
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {

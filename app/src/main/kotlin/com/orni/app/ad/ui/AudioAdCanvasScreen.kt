@@ -141,15 +141,34 @@ fun AudioAdCanvasScreen(
                         is AdUiState.Success -> {
                             val bytes = remember(state.imageBase64) { state.imageBase64.base64ToByteArray() }
                             val bitmap = remember(bytes) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Generated ad",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Generated ad",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                // Live overlay text — updated instantly on localize without re-render
+                                val overlayText = state.overlayText ?: state.intent.copyText
+                                if (!overlayText.isNullOrBlank()) {
+                                    Text(
+                                        text = overlayText,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = Color.White,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .background(Color.Black.copy(alpha = 0.45f))
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    )
+                                }
+                            }
                         }
 
-                        is AdUiState.Generating -> ShimmerCanvas(modifier = Modifier.fillMaxSize())
+                        is AdUiState.Generating  -> ShimmerCanvas(label = "Generating ad…", modifier = Modifier.fillMaxSize())
+                        is AdUiState.Animating   -> ShimmerCanvas(label = "Animating (Omni Flash)…", modifier = Modifier.fillMaxSize())
+                        is AdUiState.Localizing  -> ShimmerCanvas(label = "Translating copy…", modifier = Modifier.fillMaxSize())
 
                         is AdUiState.PermissionRequired -> PermissionRequiredState(
                             onRequest = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
@@ -177,8 +196,10 @@ fun AudioAdCanvasScreen(
                 // Live transcript / intent strip — one collapsible line
                 val transcript = when (val s = uiState) {
                     is AdUiState.IntentStabilizing -> s.transcript
-                    is AdUiState.Generating -> "Generating: ${s.intent.product}…"
-                    is AdUiState.Success -> s.intent.product
+                    is AdUiState.Generating  -> "Generating: ${s.intent.product}…"
+                    is AdUiState.Animating   -> "Animating: ${s.intent.motion?.take(40) ?: s.intent.product}…"
+                    is AdUiState.Localizing  -> "Translating to ${s.language}…"
+                    is AdUiState.Success     -> s.intent.product
                     else -> null
                 }
                 AnimatedVisibility(visible = transcript != null) {
@@ -266,7 +287,7 @@ private fun WaveformBar(amplitude: Float, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ShimmerCanvas(modifier: Modifier = Modifier) {
+private fun ShimmerCanvas(label: String = "Generating…", modifier: Modifier = Modifier) {
     val shimmer by rememberInfiniteTransition(label = "shimmer").animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -288,7 +309,7 @@ private fun ShimmerCanvas(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            "Generating…",
+            label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

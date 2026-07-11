@@ -192,7 +192,7 @@ def mint_ephemeral_token() -> EphemeralTokenResponse:
 
 
 # ---------------------------------------------------------------------------
-# Ad Canvas — generate ad frame via NB2 Lite (unchanged from Phase 0 stub)
+# Ad Canvas — generate ad frame via NB2 Lite
 # ---------------------------------------------------------------------------
 
 class GenerateAdRequest(BaseModel):
@@ -200,28 +200,48 @@ class GenerateAdRequest(BaseModel):
     background: Optional[str] = None
     copyText: Optional[str] = None
     style: Optional[str] = None
+    aspect: str = "9:16"    # "9:16" | "1:1" | "16:9"
+    energy: str = "medium"  # "low" | "medium" | "high"
 
 
 class GenerateAdResponse(BaseModel):
     imageBase64: str
 
 
+_ASPECT_DIMS = {"9:16": "1080x1920 vertical", "1:1": "1080x1080 square", "16:9": "1920x1080 landscape"}
+_ENERGY_DIR = {
+    "high": "bold, high-contrast, vivid colours, dramatic lighting, maximum visual impact",
+    "low":  "soft, minimal, muted tones, understated elegance",
+    "medium": "balanced, clean, commercial",
+}
+
+
+def _nb2_ad_prompt(req: GenerateAdRequest) -> str:
+    dims = _ASPECT_DIMS.get(req.aspect, "1080x1920 vertical")
+    energy_dir = _ENERGY_DIR.get(req.energy, _ENERGY_DIR["medium"])
+    copy_block = (
+        f'Render this EXACT headline text, spelled letter-for-letter, crisp and '
+        f'perfectly legible, bold sans-serif, high contrast: "{req.copyText}". '
+        f'Do not alter, translate, or paraphrase the words.'
+        if req.copyText else "No on-image text in this frame."
+    )
+    return (
+        f"High-resolution 1K advertising creative, {dims}.\n"
+        f"Subject: {req.product or 'the product'}, hero-lit, sharp product focus.\n"
+        f"Environment: {req.background or 'clean studio background'}.\n"
+        f"Art direction: {req.style or 'bright, editorial, high-end commercial'}. {energy_dir}.\n"
+        f"Typography: {copy_block}\n"
+        f"Constraints: single clear focal product, no watermark, no lorem ipsum, no gibberish glyphs."
+    )
+
+
 @app.post("/ad/generate", response_model=GenerateAdResponse)
 def generate_ad(request: GenerateAdRequest) -> GenerateAdResponse:
-    """Generate a 1K ad frame via NB2 Lite."""
+    """Generate a 1K ad frame via NB2 Lite with typography-first prompt discipline."""
     client = _get_client()
-    prompt_parts = [f"Create a professional advertisement for: {request.product}."]
-    if request.background:
-        prompt_parts.append(f"Background: {request.background}.")
-    if request.copyText:
-        prompt_parts.append(f"Include the text: '{request.copyText}'.")
-    if request.style:
-        prompt_parts.append(f"Style: {request.style}.")
-    prompt_parts.append("Square format, 1024x1024, high quality.")
-
     response = client.models.generate_content(
         model=_NB2_LITE_MODEL,
-        contents=" ".join(prompt_parts),
+        contents=_nb2_ad_prompt(request),
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE", "TEXT"],
         ),
@@ -232,3 +252,92 @@ def generate_ad(request: GenerateAdRequest) -> GenerateAdResponse:
                 imageBase64=base64.b64encode(part.inline_data.data).decode("ascii")
             )
     raise HTTPException(status_code=502, detail="NB2 Lite returned no image for ad")
+
+
+# ---------------------------------------------------------------------------
+# Ad Canvas — animate via Omni Flash
+# ---------------------------------------------------------------------------
+
+class AnimateAdRequest(BaseModel):
+    imageBase64: str
+    motion: str
+    energy: str = "medium"
+
+
+class AnimateAdResponse(BaseModel):
+    videoBase64: str
+    audioBase64: Optional[str] = None
+
+
+@app.post("/ad/animate", response_model=AnimateAdResponse)
+def animate_ad(request: AnimateAdRequest) -> AnimateAdResponse:
+    """Animate an anchor frame via Omni Flash. Returns video + optional TTS audio."""
+    client = _get_client()
+    energy_dir = _ENERGY_DIR.get(request.energy, _ENERGY_DIR["medium"])
+    prompt = (
+        f"Animate the provided reference image into a ~5s cinematic clip.\n"
+        f"Motion: {request.motion}. Pacing: {energy_dir}.\n"
+        f"Keep the product, composition, and any on-frame text identical to the reference "
+        f"— animate the scene, do not regenerate or restyle the subject."
+    )
+    image_bytes = base64.b64decode(request.imageBase64)
+    response = client.models.generate_content(
+        model=_OMNI_FLASH_MODEL,
+        contents=[
+            types.Part.from_text(prompt),
+            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+        ],
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
+        ),
+    )
+    for part in response.candidates[0].content.parts:
+        if part.inline_data is not None:
+            mime = part.inline_data.mime_type or ""
+            b64 = base64.b64encode(part.inline_data.data).decode("ascii")
+            if mime.startswith("video"):
+                return AnimateAdResponse(videoBase64=b64)
+            if mime.startswith("image"):
+                # Omni Flash returned an edited image instead of video — surface it
+                return AnimateAdResponse(videoBase64=b64)
+    raise HTTPException(status_code=502, detail="Omni Flash returned no video")
+
+
+# ---------------------------------------------------------------------------
+# Ad Canvas — localize copy (instant overlay swap, no re-render)
+# ---------------------------------------------------------------------------
+
+class LocalizeAdRequest(BaseModel):
+    copyText: str
+    language: str  # ISO code: "hi" | "kn" | "ta"
+
+
+class LocalizeAdResponse(BaseModel):
+    translatedText: str
+
+
+_MOCK_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "hi": {"Hydrate Smart": "स्मार्ट हाइड्रेशन", "Brewed in Bengaluru": "बेंगलुरु में बना"},
+    "kn": {"Hydrate Smart": "ಸ್ಮಾರ್ಟ್ ಹೈಡ್ರೇಟ್", "Brewed in Bengaluru": "ಬೆಂಗಳೂರಿನಲ್ಲಿ ತಯಾರಿಸಲಾಗಿದೆ"},
+    "ta": {"Hydrate Smart": "ஸ்மார்ட் ஹைட்ரேட்", "Brewed in Bengaluru": "பெங்களூருவில் தயாரிக்கப்பட்டது"},
+}
+
+
+@app.post("/ad/localize", response_model=LocalizeAdResponse)
+def localize_ad(request: LocalizeAdRequest) -> LocalizeAdResponse:
+    """Translate ad copy into the target language. No image re-render."""
+    if not GEMINI_API_KEY:
+        # Mock: return a canned translation so the overlay-swap flow is demonstrable.
+        translated = _MOCK_TRANSLATIONS.get(request.language, {}).get(
+            request.copyText, f"[{request.language}] {request.copyText}"
+        )
+        return LocalizeAdResponse(translatedText=translated)
+
+    client = _get_client()
+    lang_names = {"hi": "Hindi", "kn": "Kannada", "ta": "Tamil"}
+    lang_name = lang_names.get(request.language, request.language)
+    response = client.models.generate_content(
+        model=_NB2_LITE_MODEL,
+        contents=f"Translate to {lang_name}. Return ONLY the translation, no commentary:\n{request.copyText}",
+    )
+    return LocalizeAdResponse(translatedText=(response.text or "").strip())
