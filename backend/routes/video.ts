@@ -60,9 +60,35 @@ videoRouter.post('/video/turn', async (req, res) => {
     return res.status(400).json({ error: "assetId and prompt are required" });
   }
 
-  const prevSessionId = sessionStore.getSession(assetId);
+  let prevSessionId = sessionStore.getSession(assetId);
   if (!prevSessionId) {
-    return res.status(400).json({ error: "No active session found for this asset. Please seed the session first." });
+    console.log(`No active session found for asset: ${assetId}. Dynamically seeding...`);
+    try {
+      const seedInteraction = await ai.interactions.create({
+        model: env.OMNI_FLASH_MODEL,
+        input: [
+          {
+            type: "image",
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN88B8AAugB2uUkHn0AAAAASUVORK5CYII=",
+            mime_type: "image/png"
+          } as any,
+          {
+            type: "text",
+            text: `Base image creative background for: ${prompt}`
+          }
+        ]
+      });
+      if (seedInteraction.id) {
+        sessionStore.setSession(assetId, seedInteraction.id);
+        prevSessionId = seedInteraction.id;
+      }
+    } catch (err) {
+      console.error("Dynamic session seeding failed:", err);
+    }
+  }
+
+  if (!prevSessionId) {
+    return res.status(400).json({ error: "Failed to dynamically warm video session." });
   }
 
   try {

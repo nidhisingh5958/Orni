@@ -125,17 +125,18 @@ export function useAssetPipeline() {
         setLatency(Date.now() - startTime);
 
       } else if (intent.intent === 'animate') {
-        if (!activeAssetId || !imageSrc) {
-          throw new Error('Please speak to generate a base creative image first.');
+        const currentAssetId = activeAssetId || `asset_${Date.now()}`;
+        if (!activeAssetId) {
+          setActiveAssetId(currentAssetId);
         }
 
         const prompt = intent.prompt || 'Cinematic pan';
         const voiceover = intent.voiceover || '';
-        setGenerationMessage(`Animating creative: "${prompt}"...`);
+        setGenerationMessage(`Generating video for: "${prompt}"...`);
 
         // Execute video animation and TTS script generation in parallel to reduce perceived latency
         const [videoResult, ttsResult] = await Promise.all([
-          apiClient.editVideo(activeAssetId, prompt, controller.signal),
+          apiClient.editVideo(currentAssetId, prompt, controller.signal),
           voiceover ? apiClient.generateTts(voiceover, controller.signal) : Promise.resolve(null)
         ]);
 
