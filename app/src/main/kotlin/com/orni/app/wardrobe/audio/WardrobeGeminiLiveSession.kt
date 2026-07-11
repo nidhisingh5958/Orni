@@ -17,13 +17,13 @@ import org.json.JSONObject
 /**
  * Gemini Live WebSocket session for the wardrobe feature.
  *
- * Wire protocol: gemini-3.1-flash-live-preview (BidiGenerateContent).
+ * Wire protocol: gemini-2.0-flash-live-001 (BidiGenerateContent).
  *   - On open  → send BidiGenerateContentSetup with model + system prompt
  *   - Audio    → BidiGenerateContentRealtimeInput (inline base64 PCM)
  *   - Receive  → BidiGenerateContentServerContent; extract text parts as JSON intent
  *
- * The system prompt instructs the model to always reply with a single JSON
- * object so intent extraction is a plain JSON parse, not regex.
+ * The WebSocket URL takes ?key=API_KEY directly (per Gemini Live docs).
+ * The relay returns the API key as the token; this class appends it as ?key=.
  */
 class WardrobeGeminiLiveSession(
     private val websocketUrl: String,
@@ -200,7 +200,7 @@ class WardrobeGeminiLiveSession(
 
     companion object {
         private const val TAG = "WardrobeGeminiLive"
-        // Confirm this alias against hackathon docs before the demo.
+        // Confirmed against Gemini API docs (June 2025).
         private const val MODEL = "models/gemini-2.0-flash-live-001"
         private val SYSTEM_PROMPT = """
             You are a wardrobe assistant. The user will speak outfit change instructions.

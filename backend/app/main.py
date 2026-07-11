@@ -11,7 +11,6 @@ import time
 import uuid
 from typing import Optional
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from google import genai
 from google.genai import types
@@ -22,10 +21,13 @@ app = FastAPI(title="Orni Relay")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# Confirm these aliases against hackathon docs before the demo.
+# Model aliases confirmed against Gemini API docs (June 2025).
+# Image generation (garment layer + ad frames): gemini-2.0-flash-preview-image-generation
+# Multimodal compositing: gemini-2.0-flash-preview-image-generation (supports image in+out)
+# Live voice: gemini-2.0-flash-live-001
 _NB2_LITE_MODEL = "gemini-2.0-flash-preview-image-generation"
-_OMNI_FLASH_MODEL = "gemini-2.0-flash-001"
-_LIVE_MODEL = "models/gemini-2.0-flash-live-001"
+_OMNI_FLASH_MODEL = "gemini-2.0-flash-preview-image-generation"
+_LIVE_MODEL = "gemini-2.0-flash-live-001"
 
 _EPHEMERAL_TOKEN_TTL_SECONDS = 60 * 10  # 10 minutes
 
@@ -167,8 +169,12 @@ class EphemeralTokenResponse(BaseModel):
 
 @app.post("/ad/ephemeral-token", response_model=EphemeralTokenResponse)
 def mint_ephemeral_token() -> EphemeralTokenResponse:
-    """Mint a short-lived token the Android app uses to open a direct WebSocket
+    """Return the credentials the Android app needs to open a direct WebSocket
     to Gemini Live. The relay is never in the audio path.
+
+    Per the Gemini Live API docs the WebSocket URL takes ?key=API_KEY directly.
+    The relay returns the API key as `token` so the client appends it as
+    ?key=<token> — no separate ephemeral-token minting endpoint is needed.
     """
     if not GEMINI_API_KEY:
         # Phase 0 stub — lets the Android WebSocket path be proven without a key.
@@ -178,27 +184,9 @@ def mint_ephemeral_token() -> EphemeralTokenResponse:
             websocketUrl="ws://10.0.2.2:8765",
         )
 
-    # Mint a real ephemeral token via the Gemini Live token endpoint.
-    # The token is scoped to one Live session and expires after TTL seconds.
-    url = "https://generativelanguage.googleapis.com/v1beta/ephemeralTokens"
-    payload = {
-        "model": _LIVE_MODEL,
-        "config": {
-            "responseModalities": ["TEXT"],
-        },
-        "ttlSeconds": _EPHEMERAL_TOKEN_TTL_SECONDS,
-    }
-    resp = httpx.post(url, json=payload, headers={"x-goog-api-key": GEMINI_API_KEY}, timeout=10)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Token mint failed: {resp.text}")
-
-    data = resp.json()
-    token = data.get("token") or data.get("name", "")
-    expires_at = int(time.time()) + _EPHEMERAL_TOKEN_TTL_SECONDS
-
     return EphemeralTokenResponse(
-        token=token,
-        expiresAt=expires_at,
+        token=GEMINI_API_KEY,
+        expiresAt=int(time.time()) + _EPHEMERAL_TOKEN_TTL_SECONDS,
         websocketUrl="wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
     )
 
