@@ -1,47 +1,60 @@
+# ============================================================
 # Android / Gradle
+# ============================================================
 *.iml
 .gradle/
-**/.gradle/
 .kotlin/
-**/.kotlin/
-/local.properties
-/.idea/
+local.properties
+.idea/
 .DS_Store
-/build/
-**/build/
-/captures/
+
+# Build outputs — no leading slash so app/build/, etc. are all covered
+build/
+captures/
 .externalNativeBuild/
 .cxx/
+
+# Compiled artifacts
 *.apk
+*.aab
 *.ap_
 *.dex
 *.class
 
+# ============================================================
 # Backend (Python)
-backend/.venv/
-backend/__pycache__/
-backend/**/__pycache__/
+# ============================================================
+.venv/
+__pycache__/
 *.pyc
 *.py[cod]
 *.pyo
 *.pyd
-**/.pytest_cache/
-**/.mypy_cache/
-**/.ruff_cache/
-**/htmlcov/
-**/dist/
-**/*.egg-info/
+*.pdb
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+instance/
 
-# Env / secrets
+# ============================================================
+# Secrets / environment
+# ============================================================
 .env
+.env.*
+!.env.sample
+!.env.example
 
-# Local logs and Python cache artifacts
+# ============================================================
+# Logs and runtime artifacts
+# ============================================================
 *.log
 *.pid
 *.out
 *.err
 *.coverage
 *.coverage.*
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
