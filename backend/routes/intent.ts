@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ai } from '../services/geminiClient';
+import { env } from '../config/env';
 
 export const intentRouter = Router();
 
@@ -27,7 +28,7 @@ intentRouter.post('/intent/parse', async (req, res) => {
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: env.INTENT_MODEL,
       contents: `User command: "${text}"`,
       config: {
         systemInstruction,

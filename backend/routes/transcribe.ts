@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ai } from '../services/geminiClient';
+import { env } from '../config/env';
 
 export const transcribeRouter = Router();
 
@@ -46,7 +47,7 @@ transcribeRouter.post('/transcribe', async (req, res) => {
   try {
     console.log("[Transcribe Router] Falling back to Gemini audio parser...");
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: env.INTENT_MODEL,
       contents: [
         {
           inlineData: {
