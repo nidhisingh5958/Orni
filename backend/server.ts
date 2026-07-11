@@ -8,6 +8,7 @@ import { imageRouter } from './routes/image';
 import { videoRouter } from './routes/video';
 import { ttsRouter } from './routes/tts';
 import { translateRouter } from './routes/translate';
+import { intentRouter } from './routes/intent';
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/api', imageRouter);
 app.use('/api', videoRouter);
 app.use('/api', ttsRouter);
 app.use('/api', translateRouter);
+app.use('/api', intentRouter);
 
 // Create HTTP server from express app to handle WS upgrades
 const server = http.createServer(app);

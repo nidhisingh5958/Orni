@@ -93,5 +93,16 @@ export const apiClient = {
     });
     if (!response.ok) throw new Error("Translation API call failed");
     return response.json();
+  },
+
+  async parseIntent(text: string, signal?: AbortSignal): Promise<{ type: 'wardrobe' | 'videogen' | 'filter'; subject: string; prompt: string }> {
+    const response = await fetch(`${BACKEND_URL}/api/intent/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal
+    });
+    if (!response.ok) throw new Error("Intent parsing failed");
+    return response.json();
   }
 };

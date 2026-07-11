@@ -1,57 +1,92 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { VoiceStreamClient } from '../components/VoiceStreamClient';
-import type { ParsedIntent } from '../lib/intentTypes';
 
 export function useVoiceSession(callbacks: {
-  onIntent: (intent: ParsedIntent) => void;
+  onIntentText: (text: string) => void;
   onInterrupted: () => void;
 }) {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const [transcript, setTranscript] = useState('');
-  const [parsedIntent, setParsedIntent] = useState<ParsedIntent | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const clientRef = useRef<VoiceStreamClient | null>(null);
+
+  const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
 
   const startSession = useCallback(async (existingStream?: MediaStream | null) => {
     setError(null);
     setTranscript('');
-    setParsedIntent(null);
+    setStatus('connecting');
 
-    const client = new VoiceStreamClient({
-      onTranscriptChunk: (chunk) => {
-        setTranscript((prev) => prev + chunk);
-      },
-      onIntentParsed: (intent) => {
-        setParsedIntent(intent);
-        callbacks.onIntent(intent);
-      },
-      onInterrupted: () => {
-        callbacks.onInterrupted();
-      },
-      onError: (msg) => {
-        setError(msg);
-      },
-      onStatusChange: (newStatus) => {
-        setStatus(newStatus);
-      }
-    });
+    // Resolve native speech recognition constructors in web environments
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    clientRef.current = client;
-    await client.start(existingStream);
+    if (!SpeechRecognition) {
+      setError("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+      setStatus('disconnected');
+      return;
+    }
+
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = false; // Stop listening automatically once the user finishes speaking
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onstart = () => {
+        setStatus('connected');
+        isListeningRef.current = true;
+      };
+
+      rec.onresult = (event: any) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            const final = event.results[i][0].transcript;
+            setTranscript(final);
+            callbacks.onIntentText(final);
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+            setTranscript(interimTranscript);
+          }
+        }
+      };
+
+      rec.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        if (event.error !== 'no-speech') {
+          setError(`Microphone error: ${event.error}`);
+        }
+        setStatus('disconnected');
+        isListeningRef.current = false;
+      };
+
+      rec.onend = () => {
+        setStatus('disconnected');
+        isListeningRef.current = false;
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (e: any) {
+      console.error("Failed to start SpeechRecognition:", e);
+      setError(e.message || "Failed to start microphone speech parser.");
+      setStatus('disconnected');
+      isListeningRef.current = false;
+    }
   }, [callbacks]);
 
   const stopSession = useCallback(() => {
-    if (clientRef.current) {
-      clientRef.current.stop();
-      clientRef.current = null;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
     setStatus('disconnected');
+    isListeningRef.current = false;
   }, []);
 
   useEffect(() => {
     return () => {
-      if (clientRef.current) {
-        clientRef.current.stop();
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
       }
     };
   }, []);
@@ -60,7 +95,6 @@ export function useVoiceSession(callbacks: {
     isListening: status === 'connected' || status === 'connecting',
     status,
     transcript,
-    parsedIntent,
     error,
     startSession,
     stopSession

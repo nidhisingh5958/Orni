@@ -4,6 +4,7 @@ import { useAssetPipeline } from './hooks/useAssetPipeline';
 import { Canvas } from './components/Canvas';
 import { PlaceholderShimmer } from './components/PlaceholderShimmer';
 import { TranscriptOverlay } from './components/TranscriptOverlay';
+import { apiClient } from './lib/apiClient';
 import './styles/app.css';
 
 export default function App() {
@@ -37,7 +38,7 @@ export default function App() {
   const [clothImageBytes, setClothImageBytes] = useState<string | null>(null);
   const [manualInput, setManualInput] = useState('');
 
-  // Local mirror snap indicators
+  // Dynamic mirror overlays
   const [wardrobeStyle, setWardrobeStyle] = useState<'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null>(null);
   const [activeFilter, setActiveFilter] = useState<'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null>(null);
 
@@ -46,109 +47,133 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Hook live WebSocket voice stream session
+  // Hook live SpeechRecognition transcription session
   const {
     isListening,
     status,
     transcript,
-    parsedIntent,
     error: voiceError,
     startSession,
     stopSession
   } = useVoiceSession({
-    onIntent: (intent) => {
-      routeParsedIntent(intent);
+    onIntentText: (text) => {
+      processUserTextCommand(text);
     },
     onInterrupted: () => {
       cancelActiveRequest();
     }
   });
 
-  // Automatically request camera/microphone streams on page load
+  // Request camera access immediately on page load, but keep microphone muted/off by default
   useEffect(() => {
     const initCameraOnLoad = async () => {
       try {
-        console.log('[App] Initializing hardware media devices...');
+        console.log('[App] Requesting camera stream track...');
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1024, height: 1024 },
           audio: true
         });
         setCameraStream(stream);
-        await startSession(stream);
       } catch (e) {
-        console.error('[App] Media capture blocked, requesting mic fallback:', e);
+        console.error('[App] Camera capture blocked, trying default constraints:', e);
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          await startSession(stream);
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setCameraStream(stream);
         } catch (err) {
-          console.error('[App] Complete mic permission block:', err);
-          setErrorMsg("Hardware permissions denied. Please allow microphone & camera access to run the creative mirror.");
+          console.error('[App] Complete media permission block:', err);
+          setErrorMsg("Hardware permissions denied. Please allow camera access to run the creative mirror.");
         }
       }
     };
     initCameraOnLoad();
 
     return () => {
-      stopSession();
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
 
-  // Route parsed voice commands dynamically to Try-On or Video Gen
-  const routeParsedIntent = async (intent: any) => {
-    if (!intent) return;
-    const text = (intent.prompt || intent.description || '').toLowerCase();
+  // Process translated voice/text commands dynamically through Gemini without client-side keywords
+  const processUserTextCommand = async (text: string) => {
+    if (!text.trim()) return;
 
-    // 1. Check if the voice command is for Digital Try-On
-    if (intent.intent === 'wardrobe' || text.includes('style') || text.includes('wear') || text.includes('coat') || text.includes('jacket') || text.includes('put on') || text.includes('outfit')) {
-      setActiveTab('wardrobe');
-      
-      // Determine wardrobe style index instantly for zero-latency placeholder
-      let localStyle: any = null;
-      if (text.includes('old money') || text.includes('blazer') || text.includes('suit') || text.includes('cream')) {
-        localStyle = 'old-money';
-      } else if (text.includes('space') || text.includes('astronaut') || text.includes('cosmic')) {
-        localStyle = 'space-suit';
-      } else if (text.includes('cyberpunk') || text.includes('neon') || text.includes('jacket')) {
-        localStyle = 'cyberpunk';
-      } else if (text.includes('tactical') || text.includes('war') || text.includes('armor') || text.includes('vest')) {
-        localStyle = 'tactical-armor';
+    setTextOverlay(`Listening: "${text}"...`);
+    
+    try {
+      // 1. Send the natural language command to the backend Gemini Intent parser
+      const parsed = await apiClient.parseIntent(text);
+      console.log("[App] Resolved Dynamic Intent:", parsed);
+
+      // 2. Route dynamically based on Gemini's categorization
+      if (parsed.type === 'wardrobe') {
+        setActiveTab('wardrobe');
+        setTryonImageSrc(null); // Reset previous frame
+
+        // Dynamically select outfit overlay placeholder based on Gemini's identified subject
+        const sub = parsed.subject.toLowerCase();
+        let overlayPlaceholder: any = null;
+        if (sub.includes('money') || sub.includes('suit') || sub.includes('coat') || sub.includes('blazer')) {
+          overlayPlaceholder = 'old-money';
+        } else if (sub.includes('space') || sub.includes('astronaut')) {
+          overlayPlaceholder = 'space-suit';
+        } else if (sub.includes('cyber') || sub.includes('neon') || sub.includes('jacket')) {
+          overlayPlaceholder = 'cyberpunk';
+        } else if (sub.includes('combat') || sub.includes('armor') || sub.includes('vest') || sub.includes('tactical')) {
+          overlayPlaceholder = 'tactical-armor';
+        }
+        setWardrobeStyle(overlayPlaceholder);
+        setTextOverlay(`AI Styling: putting ${parsed.subject} on you...`);
+
+        // Capture current canvas frame bytes
+        const canvasEl = document.querySelector('.ad-canvas') as HTMLCanvasElement;
+        let frameBase64 = '';
+        if (canvasEl) {
+          frameBase64 = canvasEl.toDataURL('image/png').split(',')[1];
+        }
+
+        // Call backend AI virtual try-on
+        await runVirtualTryon(
+          parsed.subject,
+          frameBase64,
+          clothImageBytes || undefined
+        );
+
+        setTextOverlay(clothImageBytes ? "AI Try-On: Custom uploaded item styled!" : `AI Try-On: ${parsed.subject} styled!`);
+
+      } else if (parsed.type === 'filter') {
+        setActiveTab('wardrobe');
+        const sub = parsed.subject.toLowerCase();
+        let activeF: any = null;
+        if (sub.includes('cinematic')) activeF = 'cinematic';
+        else if (sub.includes('sci-fi') || sub.includes('hud')) activeF = 'sci-fi';
+        else if (sub.includes('war') || sub.includes('sepia')) activeF = 'war';
+        else if (sub.includes('glitch') || sub.includes('cyber')) activeF = 'cyberpunk';
+        
+        setActiveFilter(activeF);
+        setTextOverlay(`Applied Mirror Overlay: ${parsed.subject}`);
+
+      } else if (parsed.type === 'videogen') {
+        setActiveTab('videogen');
+        setTextOverlay(`AI Video Gen: "${parsed.prompt}"...`);
+
+        // Trigger side-panel video generation pipeline
+        const dummyIntent = {
+          intent: 'animate' as const,
+          prompt: parsed.prompt,
+          voiceover: `Here is the cinematic video loop generated for: ${parsed.prompt}`
+        };
+        await handleIntent(dummyIntent);
+        setTextOverlay(`Video Generated: ${parsed.prompt}`);
       }
-      setWardrobeStyle(localStyle);
-      setTextOverlay(`AI processing try-on for style: ${text || 'clothing item'}...`);
 
-      // Clear previous try-on result before starting a new request
-      setTryonImageSrc(null);
-
-      // Capture current canvas frame bytes as baseline
-      const canvasEl = document.querySelector('.ad-canvas') as HTMLCanvasElement;
-      let frameBase64 = '';
-      if (canvasEl) {
-        frameBase64 = canvasEl.toDataURL('image/png').split(',')[1];
-      }
-
-      // Execute backend AI try-on image-to-image edit
-      await runVirtualTryon(
-        text || 'fitting coat',
-        frameBase64,
-        clothImageBytes || undefined
-      );
-
-      setTextOverlay(clothImageBytes ? "AI Try-On: Uploaded Outfit applied" : `AI Try-On: ${text || 'coat'} applied`);
-
-    // 2. Otherwise route to Standalone Video Generation
-    } else {
-      setActiveTab('videogen');
-      setTextOverlay(`Generating cinematic video: "${intent.prompt || 'cinematic campaign'}"`);
-
-      // Trigger background video loops and metadata updates
-      await handleIntent(intent);
+    } catch (e: any) {
+      console.error("[App] Intent parsing error:", e);
+      setErrorMsg(e.message || "Failed to process text command.");
     }
   };
 
-  // Mute / Unmute switch
+  // Microphone toggle button
   const handleMicToggle = async () => {
     if (isListening) {
       stopSession();
@@ -172,53 +197,26 @@ export default function App() {
       const dataUrl = event.target?.result as string;
       const base64 = dataUrl.split(',')[1];
       setClothImageBytes(base64);
-      setTextOverlay("Digital Clothing uploaded. Speak try-on command to fit it.");
+      setTextOverlay("Digital Clothing uploaded. Speak try-on command to style it.");
     };
     reader.readAsDataURL(file);
   };
 
   // Manual Trigger options for testing in standard demo environments
-  const handleManualTryonTrigger = async (styleName: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor') => {
-    setActiveTab('wardrobe');
-    setWardrobeStyle(styleName);
-    setTryonImageSrc(null);
-    setTextOverlay(`AI processing: trying on ${styleName.replace('-', ' ')}...`);
-
-    const canvasEl = document.querySelector('.ad-canvas') as HTMLCanvasElement;
-    let frameBase64 = '';
-    if (canvasEl) {
-      frameBase64 = canvasEl.toDataURL('image/png').split(',')[1];
-    }
-
-    await runVirtualTryon(
-      `wear a ${styleName.replace('-', ' ')}`,
-      frameBase64,
-      clothImageBytes || undefined
-    );
-    setTextOverlay(`AI Try-On: ${styleName.replace('-', ' ')} applied`);
+  const handleManualTryonTrigger = (styleName: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor') => {
+    processUserTextCommand(`wear an ${styleName.replace('-', ' ')}`);
   };
 
   // Manual Video generation test
-  const handleManualVideoTrigger = async (promptText: string) => {
-    setActiveTab('videogen');
-    const dummyIntent = {
-      intent: 'animate' as const,
-      prompt: promptText,
-      voiceover: "Here is your cinematic generated video output."
-    };
-    await handleIntent(dummyIntent);
+  const handleManualVideoTrigger = (promptText: string) => {
+    processUserTextCommand(`generate a video of ${promptText}`);
   };
 
   // Keyboard command override form
   const handleManualCommandSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
-    
-    routeParsedIntent({
-      intent: 'wardrobe',
-      prompt: manualInput,
-      description: manualInput
-    });
+    processUserTextCommand(manualInput);
     setManualInput('');
   };
 
@@ -236,7 +234,7 @@ export default function App() {
           </button>
           <div className="system-status">
             <span className="status-indicator" data-status={status}></span>
-            <span>Mirror: {status.toUpperCase()}</span>
+            <span>Microphone: {status.toUpperCase()}</span>
           </div>
         </div>
       </header>
@@ -284,7 +282,7 @@ export default function App() {
             <PlaceholderShimmer visible={isGenerating} message={generationMessage} />
           </div>
 
-          {/* Continuous microphone bar */}
+          {/* Continuous microphone bar (OFF by default) */}
           <div className="voice-action-container">
             <button
               onClick={handleMicToggle}
@@ -294,7 +292,7 @@ export default function App() {
               {isListening ? '🎙️' : '🔇'}
             </button>
             <span className="voice-status-text">
-              {isListening ? 'Microphone Active' : 'Microphone Muted'}
+              {isListening ? 'Microphone Listening...' : 'Microphone Muted (Click to speak)'}
             </span>
           </div>
 
@@ -374,8 +372,8 @@ export default function App() {
           <div className="card-section">
             <h3 className="card-title">Video Generation Presets</h3>
             <div className="grid-buttons">
-              <button onClick={() => handleManualVideoTrigger('Generate a sports car racing loop')} className="action-tag-btn">🏎️ Car Racing</button>
-              <button onClick={() => handleManualVideoTrigger('Generate a space battle sci-fi scene')} className="action-tag-btn">🌌 Sci-Fi Space War</button>
+              <button onClick={() => handleManualVideoTrigger('sports car racing loop')} className="action-tag-btn">🏎️ Car Racing</button>
+              <button onClick={() => handleManualVideoTrigger('space battle sci-fi scene')} className="action-tag-btn">🌌 Sci-Fi Space War</button>
             </div>
           </div>
 
@@ -418,7 +416,7 @@ export default function App() {
           <TranscriptOverlay
             status={status}
             transcript={transcript}
-            parsedIntent={parsedIntent}
+            parsedIntent={null}
             latency={latency}
           />
         </section>
