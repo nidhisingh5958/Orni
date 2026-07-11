@@ -28,6 +28,7 @@ export default function App() {
   } = useAssetPipeline();
 
   const [manualInput, setManualInput] = useState('');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
 
   // Connect to live voice session
   const {
@@ -47,11 +48,36 @@ export default function App() {
     }
   });
 
-  const handleVoiceToggle = () => {
+  const handleVoiceToggle = async () => {
     if (isListening) {
+      // Stop the voice session
       stopSession();
+      
+      // Stop and clear the camera stream tracks
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        setCameraStream(null);
+      }
     } else {
-      startSession();
+      let stream: MediaStream | null = null;
+      try {
+        // Request both video and audio streams simultaneously
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480 },
+          audio: true
+        });
+        setCameraStream(stream);
+      } catch (e) {
+        console.error('Camera/Mic permission failed, requesting mic only:', e);
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          console.error('Mic permission failed:', err);
+        }
+      }
+
+      // Start the WebSocket live session reusing the active hardware stream
+      await startSession(stream);
     }
   };
 
@@ -105,6 +131,14 @@ export default function App() {
     setManualInput('');
   };
 
+  // Trigger manual regional translation localization
+  const triggerTranslation = (lang: 'Hindi' | 'Kannada') => {
+    handleIntent({
+      intent: 'translate',
+      language: lang
+    });
+  };
+
   return (
     <div className="app-container">
       <header className="app-header">
@@ -133,6 +167,7 @@ export default function App() {
             videoSrc={videoSrc}
             textOverlay={textOverlay}
             isShimmering={isGenerating}
+            cameraStream={cameraStream}
           />
           {/* Optimistic visual loading shimmers */}
           <PlaceholderShimmer visible={isGenerating} message={generationMessage} />
@@ -142,7 +177,7 @@ export default function App() {
         <section className="controls-panel">
           {/* Voice Microphone Controls Card */}
           <div className="card-section">
-            <h3 className="card-title">Continuous Microphone Pipeline</h3>
+            <h3 className="card-title">Live Video & Microphone Pipeline</h3>
             <div className="voice-action-container">
               <button
                 onClick={handleVoiceToggle}
@@ -152,10 +187,10 @@ export default function App() {
                 {isListening ? '🎙️' : '🎤'}
               </button>
               <span className="voice-status-text">
-                {isListening ? 'Listening... Speak continuously' : 'Microphone Inactive'}
+                {isListening ? 'Live Camera & Speech Active' : 'Pipeline Inactive'}
               </span>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                {isListening ? 'Say: "Create ad for coffee..." or "put on a jacket" or "animate to panning shot"' : 'Click to establish direct WebSocket connection'}
+                {isListening ? 'Camera feed drawn on canvas. Speak continuously.' : 'Click to start live camera and microphone stream'}
               </p>
             </div>
           </div>

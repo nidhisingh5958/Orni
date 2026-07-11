@@ -12,7 +12,7 @@ export function useVoiceSession(callbacks: {
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<VoiceStreamClient | null>(null);
 
-  const startSession = useCallback(async () => {
+  const startSession = useCallback(async (existingStream?: MediaStream | null) => {
     setError(null);
     setTranscript('');
     setParsedIntent(null);
@@ -37,7 +37,7 @@ export function useVoiceSession(callbacks: {
     });
 
     clientRef.current = client;
-    await client.start();
+    await client.start(existingStream);
   }, [callbacks]);
 
   const stopSession = useCallback(() => {

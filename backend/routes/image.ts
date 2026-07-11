@@ -24,7 +24,7 @@ imageRouter.post('/image', async (req, res) => {
     });
 
     const parts = response.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find(p => p.inlineData && p.inlineData.mimeType.startsWith('image/'));
+    const imagePart = parts.find(p => p.inlineData && p.inlineData.mimeType?.startsWith('image/'));
 
     if (!imagePart || !imagePart.inlineData) {
       throw new Error("No image data returned from model");

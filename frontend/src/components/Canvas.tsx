@@ -5,16 +5,19 @@ interface CanvasProps {
   videoSrc?: string; // Base64 video
   textOverlay?: string;
   isShimmering?: boolean;
+  cameraStream?: MediaStream | null;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
   imageSrc,
   videoSrc,
   textOverlay,
-  isShimmering
+  isShimmering,
+  cameraStream
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -25,7 +28,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     let animationId: number;
     let isDrawing = true;
 
-    // Set up image element
+    // Set up static image element
     const img = new Image();
     let imgLoaded = false;
     if (imageSrc && !videoSrc) {
@@ -35,7 +38,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       };
     }
 
-    // Set up video element
+    // Set up static video element
     if (videoSrc) {
       if (!videoRef.current) {
         const video = document.createElement('video');
@@ -53,6 +56,28 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (videoRef.current) {
         videoRef.current.pause();
         videoRef.current = null;
+      }
+    }
+
+    // Set up camera video element
+    if (cameraStream) {
+      if (!cameraVideoRef.current) {
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        cameraVideoRef.current = video;
+      }
+      const video = cameraVideoRef.current;
+      if (video.srcObject !== cameraStream) {
+        video.srcObject = cameraStream;
+        video.play().catch(e => console.log('Camera video play blocked:', e));
+      }
+    } else {
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.pause();
+        cameraVideoRef.current.srcObject = null;
+        cameraVideoRef.current = null;
       }
     }
 
@@ -94,6 +119,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         ctx.fillText(textOverlay, canvas.width / 2, canvas.height - 55);
       }
 
+      // Draw Live camera stream Picture-in-Picture Circle Inset
+      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
+        ctx.save();
+        ctx.beginPath();
+        // Circular PIP path: x=canvas.width - 120, y=120, radius=90
+        ctx.arc(canvas.width - 120, 120, 90, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.clip();
+
+        // Crop & Draw the camera frame inside the circular clip area
+        ctx.drawImage(cameraVideoRef.current, canvas.width - 240, 30, 240, 180);
+        ctx.restore();
+
+        // Draw border ring for the camera PIP
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(canvas.width - 120, 120, 90, 0, Math.PI * 2, true);
+        ctx.stroke();
+      }
+
       animationId = requestAnimationFrame(draw);
     };
 
@@ -105,8 +151,12 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (videoRef.current) {
         videoRef.current.pause();
       }
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.pause();
+        cameraVideoRef.current.srcObject = null;
+      }
     };
-  }, [imageSrc, videoSrc, textOverlay]);
+  }, [imageSrc, videoSrc, textOverlay, cameraStream]);
 
   return (
     <div className="canvas-container">

@@ -24,8 +24,8 @@ videoRouter.post('/video/session', async (req, res) => {
         {
           type: "image",
           data: imageBytes,
-          mimeType: "image/png"
-        },
+          mime_type: "image/png"
+        } as any,
         {
           type: "text",
           text: prompt || "Generate a panning cinematic short video loop from this image."
@@ -40,7 +40,7 @@ videoRouter.post('/video/session', async (req, res) => {
     res.json({
       success: true,
       sessionId: interaction.id,
-      videoBytes: interaction.outputVideo?.data || null
+      videoBytes: (interaction as any).output_video?.data || null
     });
   } catch (err: any) {
     console.error("Failed to seed video session:", err);
@@ -70,7 +70,7 @@ videoRouter.post('/video/turn', async (req, res) => {
 
     const interaction = await ai.interactions.create({
       model: env.OMNI_FLASH_MODEL,
-      previousInteractionId: prevSessionId,
+      previous_interaction_id: prevSessionId,
       input: prompt
     });
 
@@ -81,7 +81,7 @@ videoRouter.post('/video/turn', async (req, res) => {
     res.json({
       success: true,
       sessionId: interaction.id,
-      videoBytes: interaction.outputVideo?.data || null
+      videoBytes: (interaction as any).output_video?.data || null
     });
   } catch (err: any) {
     console.error("Interaction turn failed, using fallback:", err);

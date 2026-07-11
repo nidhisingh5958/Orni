@@ -19,23 +19,21 @@ export class VoiceStreamClient {
     }
   ) {}
 
-  public async start(): Promise<void> {
+  public async start(existingStream?: MediaStream | null): Promise<void> {
     try {
       this.callbacks.onStatusChange('connecting');
       this.accumulatedText = '';
 
-      // 1. Fetch ephemeral token from backend
-      const token = await fetchEphemeralToken();
-
-      // 2. Connect to the constrained Live API WebSocket endpoint
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${token}`;
+      // Connect to the stable backend WebSocket relay endpoint
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8787';
+      const wsUrl = backendUrl.replace(/^http/, 'ws') + '/ws';
       this.socket = new WebSocket(wsUrl);
 
       this.socket.onopen = () => {
         console.log('[VoiceStreamClient] WebSocket connected');
         this.callbacks.onStatusChange('connected');
         this.sendSetupFrame();
-        this.startMicrophone();
+        this.startMicrophone(existingStream);
       };
 
       this.socket.onmessage = (event) => {
@@ -127,9 +125,13 @@ Rules:
     this.socket.send(JSON.stringify(setupFrame));
   }
 
-  private async startMicrophone(): Promise<void> {
+  private async startMicrophone(existingStream?: MediaStream | null): Promise<void> {
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (existingStream) {
+        this.mediaStream = existingStream;
+      } else {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
 
       // Create AudioContext locked to 16000Hz. The browser automatically downsamples.
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({

@@ -31,7 +31,7 @@ ttsRouter.post('/tts', async (req, res) => {
     });
 
     const parts = response.candidates?.[0]?.content?.parts || [];
-    const audioPart = parts.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
+    const audioPart = parts.find(p => p.inlineData && p.inlineData.mimeType?.startsWith('audio/'));
 
     if (!audioPart || !audioPart.inlineData) {
       throw new Error("No audio returned from model");

@@ -17,7 +17,7 @@ tokenRouter.post('/token', async (req, res) => {
         liveConnectConstraints: {
           model: `models/${env.GEMINI_LIVE_MODEL}`,
           config: {
-            responseModalities: ['TEXT']
+            responseModalities: ['TEXT' as any]
           }
         },
         httpOptions: { apiVersion: 'v1alpha' }
