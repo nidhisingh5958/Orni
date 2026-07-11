@@ -63,7 +63,7 @@ videoRouter.post('/video/session', async (req, res) => {
         }
       ],
       config: {
-        responseModalities: ['IMAGE', 'TEXT']
+        responseModalities: ['IMAGE']
       }
     });
 
@@ -140,7 +140,7 @@ videoRouter.post('/video/turn', async (req, res) => {
         }
       ],
       config: {
-        responseModalities: ['IMAGE', 'TEXT']
+        responseModalities: ['IMAGE']
       }
     });
 

@@ -44,7 +44,7 @@ imageRouter.post('/image', async (req, res) => {
         }
       ],
       config: {
-        responseModalities: ['IMAGE', 'TEXT']
+        responseModalities: ['IMAGE']
       }
     });
 
@@ -123,7 +123,7 @@ Return ONLY the photorealistic edited image.`
       model: env.NB2_LITE_MODEL,
       contents: [{ role: 'user', parts }],
       config: {
-        responseModalities: ['IMAGE', 'TEXT']
+        responseModalities: ['IMAGE']
       }
     });
 

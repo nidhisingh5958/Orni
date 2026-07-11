@@ -21,9 +21,9 @@ export const env = {
   // gemini-2.0-flash-live-001 is the stable documented Live API model
   GEMINI_LIVE_MODEL: process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-live-001',
   GEMINI_LIVE_TRANSLATE_MODEL: process.env.GEMINI_LIVE_TRANSLATE_MODEL || 'gemini-2.0-flash-live-001',
-  // gemini-2.0-flash supports text, image (responseModalities:IMAGE), and multimodal inputs
-  NB2_LITE_MODEL: process.env.NB2_LITE_MODEL || 'gemini-2.0-flash',
-  OMNI_FLASH_MODEL: process.env.OMNI_FLASH_MODEL || 'gemini-2.0-flash',
+  // gemini-2.0-flash-preview-image-generation supports responseModalities: ["IMAGE"]
+  NB2_LITE_MODEL: process.env.NB2_LITE_MODEL || 'gemini-2.0-flash-preview-image-generation',
+  OMNI_FLASH_MODEL: process.env.OMNI_FLASH_MODEL || 'gemini-2.0-flash-preview-image-generation',
   // gemini-2.5-flash-preview-tts is the current TTS preview model
   FLASH_TTS_MODEL: process.env.FLASH_TTS_MODEL || 'gemini-2.5-flash-preview-tts',
   ANTIGRAVITY_RUNTIME_ID: process.env.ANTIGRAVITY_RUNTIME_ID || 'antigravity-preview-05-2026',
