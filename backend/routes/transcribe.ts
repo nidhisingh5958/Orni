@@ -46,7 +46,7 @@ transcribeRouter.post('/transcribe', async (req, res) => {
   try {
     console.log("[Transcribe Router] Falling back to Gemini audio parser...");
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: [
         {
           inlineData: {

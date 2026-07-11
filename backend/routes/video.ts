@@ -26,7 +26,7 @@ videoRouter.post('/video/session', async (req, res) => {
         {
           type: "image",
           data: imageBytes,
-          mime_type: "image/png"
+          mimeType: "image/png"
         } as any,
         {
           type: "text",
@@ -97,7 +97,7 @@ videoRouter.post('/video/turn', async (req, res) => {
           {
             type: "image",
             data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN88B8AAugB2uUkHn0AAAAASUVORK5CYII=",
-            mime_type: "image/png"
+            mimeType: "image/png"
           } as any,
           {
             type: "text",
