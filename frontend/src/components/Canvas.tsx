@@ -1,13 +1,14 @@
 import React, { useRef, useEffect } from 'react';
 
 interface CanvasProps {
-  imageSrc?: string; // Base64 image fallback
-  videoSrc?: string; // Base64 video fallback
+  imageSrc?: string; // Original loaded/uploaded image or try-on result
+  videoSrc?: string;
   textOverlay?: string;
   isShimmering?: boolean;
   cameraStream?: MediaStream | null;
   wardrobeStyle?: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null;
   activeFilter?: 'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null;
+  tryonImageSrc?: string | null; // Realistic AI generated try-on image backdrop
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -17,7 +18,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   isShimmering,
   cameraStream,
   wardrobeStyle,
-  activeFilter
+  activeFilter,
+  tryonImageSrc
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -32,7 +34,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     let animationId: number;
     let isDrawing = true;
 
-    // Set up static image element
+    // Set up try-on generated AI backdrop image
+    const tryonImg = new Image();
+    let tryonImgLoaded = false;
+    if (tryonImageSrc) {
+      tryonImg.src = tryonImageSrc.startsWith('data:') ? tryonImageSrc : `data:image/png;base64,${tryonImageSrc}`;
+      tryonImg.onload = () => {
+        tryonImgLoaded = true;
+      };
+    }
+
+    // Set up static image fallback element
     const img = new Image();
     let imgLoaded = false;
     if (imageSrc && !videoSrc) {
@@ -88,34 +100,34 @@ export const Canvas: React.FC<CanvasProps> = ({
     const draw = () => {
       if (!isDrawing) return;
 
-      // 1. Draw Background Backdrop
-      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
-        // Draw the full webcam stream on the canvas
+      // Clear canvas context
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1. Draw Background Backdrop (AI generated Try-on first, then live camera stream, then video/image fallbacks)
+      if (tryonImageSrc && tryonImgLoaded) {
+        ctx.drawImage(tryonImg, 0, 0, canvas.width, canvas.height);
+      } else if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
         ctx.drawImage(cameraVideoRef.current, 0, 0, canvas.width, canvas.height);
       } else if (videoRef.current && videoRef.current.readyState >= 2) {
-        // Fallback video asset loop
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       } else if (imgLoaded) {
-        // Fallback static image asset
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       } else {
-        // Premium default gradient backdrop
         const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        grad.addColorStop(0, '#0f172a');
-        grad.addColorStop(1, '#1e293b');
+        grad.addColorStop(0, '#090d16');
+        grad.addColorStop(1, '#020617');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Centered helper copy
-        ctx.fillStyle = '#475569';
-        ctx.font = '20px Inter, sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.font = '20px Manrope, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Awaiting camera stream permission...', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('Mirror Feed Initializing...', canvas.width / 2, canvas.height / 2);
       }
 
-      // 2. Draw Body Alignment Calibration Outlines
-      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)'; // glowing cyan guide
+      // 2. Draw Body Alignment Calibration Outline (Draw only when live stream is showing and try-on is not generated yet)
+      if (!tryonImageSrc && cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.35)'; // translucent blue calibration ring
         ctx.lineWidth = 3;
         ctx.setLineDash([8, 6]);
 
@@ -135,8 +147,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         ctx.setLineDash([]); // Reset line dashes
       }
 
-      // 3. Draw Digital Wardrobe Try-On Overlays
-      if (wardrobeStyle) {
+      // 3. Draw Digital Wardrobe Try-On Overlays (Draw only as instant placeholder overlays before the real AI Try-On loads)
+      if (!tryonImageSrc && wardrobeStyle) {
         if (wardrobeStyle === 'old-money') {
           // Luxury Linen Cream Blazer with Gold Amber Trims
           ctx.fillStyle = 'rgba(248, 250, 252, 0.95)'; // linen cream
@@ -305,12 +317,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       // 4. Draw Cinematic Filter/HUD Overlay
       if (activeFilter) {
         if (activeFilter === 'cinematic') {
-          // Top & Bottom Cinematic Letterbox bars
           ctx.fillStyle = '#000000';
           ctx.fillRect(0, 0, canvas.width, 120);
           ctx.fillRect(0, canvas.height - 120, canvas.width, 120);
 
-          // Film grain noise particles
           ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
           for (let i = 0; i < 250; i++) {
             const x = Math.random() * canvas.width;
@@ -318,7 +328,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             ctx.fillRect(x, y, 2, 2);
           }
 
-          // Widescreen HUD markers
           ctx.fillStyle = '#f1f5f9';
           ctx.font = '500 16px monospace';
           ctx.textAlign = 'left';
@@ -328,43 +337,36 @@ export const Canvas: React.FC<CanvasProps> = ({
           ctx.fillText('CINEMATIC 2.39:1', canvas.width - 40, 80);
 
         } else if (activeFilter === 'sci-fi') {
-          // Glowing diagnostic grid HUD overlay
-          ctx.strokeStyle = 'rgba(34, 211, 238, 0.35)'; // cyan line
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.35)';
           ctx.lineWidth = 2;
 
-          // Telemetry corner brackets
           const bracket = 50;
           const offset = 30;
 
-          // Top Left
           ctx.beginPath();
           ctx.moveTo(offset, offset + bracket);
           ctx.lineTo(offset, offset);
           ctx.lineTo(offset + bracket, offset);
           ctx.stroke();
 
-          // Top Right
           ctx.beginPath();
           ctx.moveTo(canvas.width - offset, offset + bracket);
           ctx.lineTo(canvas.width - offset, offset);
           ctx.lineTo(canvas.width - offset - bracket, offset);
           ctx.stroke();
 
-          // Bottom Left
           ctx.beginPath();
           ctx.moveTo(offset, canvas.height - offset - bracket);
           ctx.lineTo(offset, canvas.height - offset);
           ctx.lineTo(offset + bracket, canvas.height - offset);
           ctx.stroke();
 
-          // Bottom Right
           ctx.beginPath();
           ctx.moveTo(canvas.width - offset, canvas.height - offset - bracket);
           ctx.lineTo(canvas.width - offset, canvas.height - offset);
           ctx.lineTo(canvas.width - offset - bracket, canvas.height - offset);
           ctx.stroke();
 
-          // Target reticle circular crosshairs
           ctx.beginPath();
           ctx.arc(512, 512, 110, 0, Math.PI * 2);
           ctx.moveTo(512, 380);
@@ -377,7 +379,6 @@ export const Canvas: React.FC<CanvasProps> = ({
           ctx.lineTo(644, 512);
           ctx.stroke();
 
-          // Digital readout stats
           ctx.fillStyle = '#22d3ee';
           ctx.font = '14px monospace';
           ctx.textAlign = 'left';
@@ -386,11 +387,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           ctx.fillText('VIRTUAL MIRROR LOCK: ON', offset + 20, offset + 130);
 
         } else if (activeFilter === 'war') {
-          // Warm Orange Sepia Tone Tint overlay
-          ctx.fillStyle = 'rgba(180, 83, 9, 0.16)'; // Amber sepia tint
+          ctx.fillStyle = 'rgba(180, 83, 9, 0.16)';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // Simulated film scratches
           ctx.strokeStyle = 'rgba(12, 10, 9, 0.3)';
           ctx.lineWidth = 1.5;
           for (let i = 0; i < 3; i++) {
@@ -401,33 +400,28 @@ export const Canvas: React.FC<CanvasProps> = ({
             ctx.stroke();
           }
 
-          // Heavy Vignette Border Shade
           const vign = ctx.createRadialGradient(512, 512, 450, 512, 512, 750);
           vign.addColorStop(0, 'rgba(0,0,0,0)');
           vign.addColorStop(1, 'rgba(0,0,0,0.8)');
           ctx.fillStyle = vign;
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // Combat feed text
           ctx.fillStyle = '#b45309';
           ctx.font = '700 16px monospace';
           ctx.textAlign = 'right';
           ctx.fillText('WAR ROOM BATTLE FEED', canvas.width - 40, 60);
 
         } else if (activeFilter === 'cyberpunk') {
-          // Translucent Pink Tint overlay
           ctx.fillStyle = 'rgba(217, 70, 239, 0.08)';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          // Horizontal digital scanlines
           ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
           for (let y = 0; y < canvas.height; y += 6) {
             ctx.fillRect(0, y, canvas.width, 2);
           }
 
-          // Random neon digital glitches
           if (Math.random() > 0.82) {
-            ctx.fillStyle = 'rgba(34, 197, 94, 0.35)'; // cyan/green neon glitched block
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.35)';
             ctx.fillRect(Math.random() * (canvas.width - 250), Math.random() * (canvas.height - 50), 250, 30);
           }
         }
@@ -439,7 +433,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         ctx.fillRect(0, canvas.height - 110, canvas.width, 110);
 
         ctx.fillStyle = '#f8fafc';
-        ctx.font = '600 24px Inter, sans-serif';
+        ctx.font = '600 24px Manrope, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(textOverlay, canvas.width / 2, canvas.height - 55);
       }
@@ -460,7 +454,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         cameraVideoRef.current.srcObject = null;
       }
     };
-  }, [imageSrc, videoSrc, textOverlay, cameraStream, wardrobeStyle, activeFilter]);
+  }, [imageSrc, videoSrc, textOverlay, cameraStream, wardrobeStyle, activeFilter, tryonImageSrc]);
 
   return (
     <div className="canvas-container">

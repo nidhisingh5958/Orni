@@ -12,8 +12,40 @@ export function useAssetPipeline() {
   const [audioSrc, setAudioSrc] = useState<string | undefined>(undefined);
   const [latency, setLatency] = useState<number | undefined>(undefined);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [tryonImageSrc, setTryonImageSrc] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const runVirtualTryon = useCallback(async (prompt: string, frameBytes: string, clothBytes?: string) => {
+    cancelActiveRequest();
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsGenerating(true);
+    setGenerationMessage("Generating realistic AI try-on...");
+    setErrorMsg(null);
+    const startTime = Date.now();
+
+    try {
+      const result = await apiClient.generateTryon(prompt, frameBytes, clothBytes, controller.signal);
+      if (result.isFallback) {
+        setErrorMsg(result.errorMsg || 'Try-on fallback returned');
+      }
+      setTryonImageSrc(result.data);
+      setLatency(Date.now() - startTime);
+      setIsGenerating(false);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error("Try-on failed:", e);
+        setErrorMsg(e.message || "Try-on generation failed.");
+        setIsGenerating(false);
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+    }
+  }, [cancelActiveRequest]);
 
   const cancelActiveRequest = useCallback(() => {
     if (abortControllerRef.current) {
@@ -178,6 +210,9 @@ export function useAssetPipeline() {
     setVideoSrc,
     setTextOverlay,
     setActiveAssetId,
-    setErrorMsg
+    setErrorMsg,
+    tryonImageSrc,
+    setTryonImageSrc,
+    runVirtualTryon
   };
 }

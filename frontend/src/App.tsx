@@ -22,17 +22,30 @@ export default function App() {
     setVideoSrc,
     setTextOverlay,
     setActiveAssetId,
-    setErrorMsg
+    setErrorMsg,
+    tryonImageSrc,
+    setTryonImageSrc,
+    runVirtualTryon
   } = useAssetPipeline();
 
-  const [manualInput, setManualInput] = useState('');
+  // Flagship UI Layout States
+  const [activeTab, setActiveTab] = useState<'wardrobe' | 'videogen'>('wardrobe');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   
-  // Real-time styling states (snapped instantly for zero-latency feedback)
+  // Clothing upload image preview state
+  const [clothImageBytes, setClothImageBytes] = useState<string | null>(null);
+
+  // Local mirror snap indicators
   const [wardrobeStyle, setWardrobeStyle] = useState<'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null>(null);
   const [activeFilter, setActiveFilter] = useState<'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null>(null);
 
-  // Connect to live voice session
+  // Connect Theme state to document element attributes
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Hook live WebSocket voice stream session
   const {
     isListening,
     status,
@@ -43,75 +56,32 @@ export default function App() {
     stopSession
   } = useVoiceSession({
     onIntent: (intent) => {
-      // 1. Trigger zero-latency canvas updates
-      parseLocalIntent(intent);
-      // 2. Launch background Gemini asset pipeline
-      handleIntent(intent);
+      routeParsedIntent(intent);
     },
     onInterrupted: () => {
       cancelActiveRequest();
     }
   });
 
-  // Local zero-latency intent parser to change canvas overlays instantly
-  const parseLocalIntent = (intent: any) => {
-    if (!intent) return;
-    const text = (intent.prompt || intent.description || '').toLowerCase();
-    
-    if (intent.intent === 'wardrobe' || text.includes('style') || text.includes('wear') || text.includes('outfit')) {
-      if (text.includes('old money') || text.includes('blazer') || text.includes('suit') || text.includes('cream')) {
-        setWardrobeStyle('old-money');
-        setTextOverlay("Wardrobe: Old Money Cream Blazer");
-      } else if (text.includes('space') || text.includes('astronaut') || text.includes('sci fi') || text.includes('cosmic')) {
-        setWardrobeStyle('space-suit');
-        setTextOverlay("Wardrobe: Cyber Space Suit");
-      } else if (text.includes('cyberpunk') || text.includes('neon') || text.includes('jacket') || text.includes('pink')) {
-        setWardrobeStyle('cyberpunk');
-        setTextOverlay("Wardrobe: Cyberpunk Neon Jacket");
-      } else if (text.includes('tactical') || text.includes('war') || text.includes('armor') || text.includes('vest')) {
-        setWardrobeStyle('tactical-armor');
-        setTextOverlay("Wardrobe: Tactical Combat Armor");
-      }
-    }
-
-    if (intent.intent === 'animate' || intent.intent === 'new-image' || text.includes('cinematic') || text.includes('filter') || text.includes('theme') || text.includes('video')) {
-      if (text.includes('cinematic') || text.includes('widescreen') || text.includes('movie')) {
-        setActiveFilter('cinematic');
-        setTextOverlay("Theme: Widescreen Cinematic 2.39:1");
-      } else if (text.includes('sci fi') || text.includes('hud') || text.includes('space') || text.includes('grid')) {
-        setActiveFilter('sci-fi');
-        setTextOverlay("Theme: Sci-Fi Telemetry HUD");
-      } else if (text.includes('war') || text.includes('battle') || text.includes('sepia') || text.includes('military')) {
-        setActiveFilter('war');
-        setTextOverlay("Theme: War Room Sepia Feed");
-      } else if (text.includes('cyberpunk') || text.includes('glitch') || text.includes('static')) {
-        setActiveFilter('cyberpunk');
-        setTextOverlay("Theme: Cyberpunk Glitch Scanlines");
-      }
-    }
-  };
-
-  // Automatically initialize camera and microphone on page load
+  // Automatically request camera/microphone streams on page load
   useEffect(() => {
     const initCameraOnLoad = async () => {
       try {
-        console.log('[App] Requesting hardware media permissions on load...');
+        console.log('[App] Initializing hardware media devices...');
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1024, height: 1024 },
           audio: true
         });
         setCameraStream(stream);
-        
-        // Connect WebSocket speech session reusing the webcam stream
         await startSession(stream);
       } catch (e) {
-        console.error('[App] Direct audio/video getUserMedia block, falling back to mic only:', e);
+        console.error('[App] Media capture blocked, requesting mic fallback:', e);
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           await startSession(stream);
         } catch (err) {
-          console.error('[App] Complete hardware permission block:', err);
-          setErrorMsg("Hardware permissions denied. Please allow camera & microphone access in your browser.");
+          console.error('[App] Complete mic permission block:', err);
+          setErrorMsg("Hardware permissions denied. Please allow microphone & camera access to run the creative mirror.");
         }
       }
     };
@@ -125,7 +95,59 @@ export default function App() {
     };
   }, []);
 
-  // Simple Mic Mute / Unmute switch
+  // Route parsed voice commands dynamically to Try-On or Video Gen
+  const routeParsedIntent = async (intent: any) => {
+    if (!intent) return;
+    const text = (intent.prompt || intent.description || '').toLowerCase();
+
+    // 1. Check if the voice command is for Digital Try-On
+    if (intent.intent === 'wardrobe' || text.includes('style') || text.includes('wear') || text.includes('coat') || text.includes('jacket') || text.includes('put on') || text.includes('outfit')) {
+      setActiveTab('wardrobe');
+      
+      // Determine wardrobe style index instantly for zero-latency placeholder
+      let localStyle: any = null;
+      if (text.includes('old money') || text.includes('blazer') || text.includes('suit') || text.includes('cream')) {
+        localStyle = 'old-money';
+      } else if (text.includes('space') || text.includes('astronaut') || text.includes('cosmic')) {
+        localStyle = 'space-suit';
+      } else if (text.includes('cyberpunk') || text.includes('neon') || text.includes('jacket')) {
+        localStyle = 'cyberpunk';
+      } else if (text.includes('tactical') || text.includes('war') || text.includes('armor') || text.includes('vest')) {
+        localStyle = 'tactical-armor';
+      }
+      setWardrobeStyle(localStyle);
+      setTextOverlay(`AI processing try-on for style: ${text || 'clothing item'}...`);
+
+      // Clear previous try-on result before starting a new request
+      setTryonImageSrc(null);
+
+      // Capture current canvas frame bytes as baseline
+      const canvasEl = document.querySelector('.ad-canvas') as HTMLCanvasElement;
+      let frameBase64 = '';
+      if (canvasEl) {
+        frameBase64 = canvasEl.toDataURL('image/png').split(',')[1];
+      }
+
+      // Execute backend AI try-on image-to-image edit
+      await runVirtualTryon(
+        text || 'fitting coat',
+        frameBase64,
+        clothImageBytes || undefined
+      );
+
+      setTextOverlay(clothImageBytes ? "AI Try-On: Uploaded Outfit applied" : `AI Try-On: ${text || 'coat'} applied`);
+
+    // 2. Otherwise route to Standalone Video Generation
+    } else {
+      setActiveTab('videogen');
+      setTextOverlay(`Generating cinematic video: "${intent.prompt || 'cinematic campaign'}"`);
+
+      // Trigger background video loops and metadata updates
+      await handleIntent(intent);
+    }
+  };
+
+  // Mute / Unmute switch
   const handleMicToggle = async () => {
     if (isListening) {
       stopSession();
@@ -134,123 +156,237 @@ export default function App() {
     }
   };
 
-  // Manual Trigger helper buttons for demo click-throughs
-  const handleManualStyleChange = (type: 'wardrobe' | 'filter', value: any) => {
-    if (type === 'wardrobe') {
-      setWardrobeStyle(value);
-      setTextOverlay(`Wardrobe snapped: ${value ? value.replace('-', ' ') : 'None'}`);
-    } else {
-      setActiveFilter(value);
-      setTextOverlay(`Theme filter: ${value ? value : 'None'}`);
-    }
+  // Theme Toggler
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  // Fail-safe manual text input form
+  // Handle uploaded digital clothing pictures
+  const handleClothingImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      const base64 = dataUrl.split(',')[1];
+      setClothImageBytes(base64);
+      setTextOverlay("Digital Clothing uploaded. Speak try-on command to fit it.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Manual Trigger options for testing in standard demo environments
+  const handleManualTryonTrigger = async (styleName: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor') => {
+    setActiveTab('wardrobe');
+    setWardrobeStyle(styleName);
+    setTryonImageSrc(null);
+    setTextOverlay(`AI processing: trying on ${styleName.replace('-', ' ')}...`);
+
+    const canvasEl = document.querySelector('.ad-canvas') as HTMLCanvasElement;
+    let frameBase64 = '';
+    if (canvasEl) {
+      frameBase64 = canvasEl.toDataURL('image/png').split(',')[1];
+    }
+
+    await runVirtualTryon(
+      `wear a ${styleName.replace('-', ' ')}`,
+      frameBase64,
+      clothImageBytes || undefined
+    );
+    setTextOverlay(`AI Try-On: ${styleName.replace('-', ' ')} applied`);
+  };
+
+  // Manual Video generation test
+  const handleManualVideoTrigger = async (promptText: string) => {
+    setActiveTab('videogen');
+    const dummyIntent = {
+      intent: 'animate' as const,
+      prompt: promptText,
+      voiceover: "Here is your cinematic generated video output."
+    };
+    await handleIntent(dummyIntent);
+  };
+
+  // Keyboard command override form
   const handleManualCommandSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
-
-    const dummyIntent = {
+    
+    routeParsedIntent({
       intent: 'wardrobe',
       prompt: manualInput,
       description: manualInput
-    };
-    parseLocalIntent(dummyIntent);
-    handleIntent(dummyIntent);
+    });
     setManualInput('');
   };
 
   return (
     <div className="app-container">
+      {/* Header bar with Status Indicators & Theme toggle */}
       <header className="app-header">
         <div className="logo-section">
           <h1>VoiceCanvas AI</h1>
-          <p>Real-Time Voice-Driven Multimodal Creative Pipeline</p>
+          <p>Real-Time Multimodal Try-On & Video Generation Hub</p>
         </div>
-        <div className="system-status">
-          <span className="status-indicator" data-status={status}></span>
-          <span>Live Mirror Connection: {status.toUpperCase()}</span>
+        <div className="header-actions">
+          <button onClick={toggleTheme} className="theme-toggle-btn">
+            {theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode'}
+          </button>
+          <div className="system-status">
+            <span className="status-indicator" data-status={status}></span>
+            <span>Mirror: {status.toUpperCase()}</span>
+          </div>
         </div>
       </header>
 
-      {/* Global Warning Alerts */}
+      {/* Global Alert box */}
       {(errorMsg || voiceError) && (
         <div className="alert-error">
           <strong>Notice:</strong> {errorMsg || voiceError}
         </div>
       )}
 
+      {/* Flagship Side-by-Side layout */}
       <main className="workspace-grid">
-        {/* Left Column: Center Interactive Mirror Canvas */}
-        <section className="canvas-panel">
-          <Canvas
-            imageSrc={imageSrc}
-            videoSrc={videoSrc}
-            textOverlay={textOverlay}
-            isShimmering={isGenerating}
-            cameraStream={cameraStream}
-            wardrobeStyle={wardrobeStyle}
-            activeFilter={activeFilter}
-          />
-          {/* Optimistic visual loader shimmers */}
-          <PlaceholderShimmer visible={isGenerating} message={generationMessage} />
+        
+        {/* Left Column: Interactive Webcam Mirror & Local Controls */}
+        <section className="mirror-panel">
+          <div className="mode-selectors">
+            <button
+              onClick={() => setActiveTab('wardrobe')}
+              className={`mode-tab ${activeTab === 'wardrobe' ? 'active' : ''}`}
+            >
+              Virtual Styler Mirror
+            </button>
+            <button
+              onClick={() => setActiveTab('videogen')}
+              className={`mode-tab ${activeTab === 'videogen' ? 'active' : ''}`}
+            >
+              Live Video Canvas
+            </button>
+          </div>
+
+          {/* Large Main Mirror Canvas */}
+          <div style={{ position: 'relative' }}>
+            <Canvas
+              imageSrc={imageSrc}
+              videoSrc={videoSrc}
+              textOverlay={textOverlay}
+              isShimmering={isGenerating}
+              cameraStream={cameraStream}
+              wardrobeStyle={wardrobeStyle}
+              activeFilter={activeFilter}
+              tryonImageSrc={tryonImageSrc}
+            />
+            {/* Shimmer loading spinner */}
+            <PlaceholderShimmer visible={isGenerating} message={generationMessage} />
+          </div>
+
+          {/* Continuous microphone bar */}
+          <div className="voice-action-container">
+            <button
+              onClick={handleMicToggle}
+              className={`record-btn ${isListening ? 'recording' : ''}`}
+              aria-label={isListening ? 'Mute Microphone' : 'Unmute Microphone'}
+            >
+              {isListening ? '🎙️' : '🔇'}
+            </button>
+            <span className="voice-status-text">
+              {isListening ? 'Microphone Active' : 'Microphone Muted'}
+            </span>
+          </div>
+
+          {/* File Upload card: Snap digital outfits without wearing them */}
+          <div className="card-section">
+            <h3 className="card-title">Digital Cloth Upload</h3>
+            <div className="upload-btn-wrapper">
+              <button className="upload-design-btn">
+                {clothImageBytes ? '✅ Clothing Image Loaded' : '📁 Upload Clothing Image'}
+              </button>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleClothingImageUpload}
+                className="file-input"
+              />
+            </div>
+            {clothImageBytes && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                <img
+                  src={`data:image/png;base64,${clothImageBytes}`}
+                  alt="Clothing preview"
+                  style={{ width: 45, height: 45, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--panel-border)' }}
+                />
+                <button onClick={() => setClothImageBytes(null)} className="action-tag-btn" style={{ padding: '0.35rem 0.5rem', border: 'none', background: 'var(--danger-color)', color: 'white', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem' }}>Remove</button>
+              </div>
+            )}
+          </div>
+
+          {/* Manual Try-on triggers for click demonstrations */}
+          <div className="card-section">
+            <h3 className="card-title">Wardrobe Styling Presets</h3>
+            <div className="grid-buttons">
+              <button onClick={() => handleManualTryonTrigger('old-money')} className="action-tag-btn">👔 Old Money Blazer</button>
+              <button onClick={() => handleManualTryonTrigger('space-suit')} className="action-tag-btn">🚀 Space Suit</button>
+              <button onClick={() => handleManualTryonTrigger('cyberpunk')} className="action-tag-btn">🧥 Cyberpunk Jacket</button>
+              <button onClick={() => handleManualTryonTrigger('tactical-armor')} className="action-tag-btn">🛡️ Combat Vest</button>
+            </div>
+          </div>
         </section>
 
-        {/* Right Column: Mirror Dashboard Controls */}
-        <section className="controls-panel">
-          {/* Microphone Status card */}
-          <div className="card-section">
-            <h3 className="card-title">Continuous Microphone Pipeline</h3>
-            <div className="voice-action-container">
-              <button
-                onClick={handleMicToggle}
-                className={`record-btn ${isListening ? 'recording' : ''}`}
-                aria-label={isListening ? 'Mute Microphone' : 'Unmute Microphone'}
-              >
-                {isListening ? '🎙️' : '🔇'}
-              </button>
-              <span className="voice-status-text">
-                {isListening ? 'Microphone Active' : 'Microphone Muted'}
-              </span>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                {isListening ? 'Speak naturally to change wardrobes or cinematic video loops' : 'Click microphone icon to unmute voice session'}
-              </p>
-            </div>
+        {/* Right Column: Video Generation Hub */}
+        <section className="video-hub-panel">
+          <h3 className="card-title" style={{ fontSize: '1.25rem' }}>AI Standalone Video Output</h3>
+          
+          <div className="video-player-container">
+            {videoSrc ? (
+              <video
+                src={`data:video/mp4;base64,${videoSrc}`}
+                autoPlay
+                loop
+                muted
+                playsInline
+                controls
+              />
+            ) : (
+              <div className="video-placeholder-text">
+                <p style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📹</p>
+                <p>No video generated yet.</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                  Speak commands like: "Generate a futuristic space war video" or "create a car racing cinematic loop" to see the output here.
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Real-time Digital Wardrobe Triggers */}
+          {/* Video player metadata details */}
+          {videoSrc && (
+            <div className="video-meta-section">
+              <span style={{ fontWeight: 700, color: 'var(--accent-color)' }}>Status: Generation complete</span>
+              <span>Asset ID: {activeAssetId || 'Seeded Session'}</span>
+              <span>Inference duration: {latency ? `${(latency / 1000).toFixed(2)}s` : 'N/A'}</span>
+            </div>
+          )}
+
+          {/* Manual Video triggers */}
           <div className="card-section">
-            <h3 className="card-title">Virtual Wardrobe Snaps</h3>
+            <h3 className="card-title">Video Generation Presets</h3>
             <div className="grid-buttons">
-              <button onClick={() => handleManualStyleChange('wardrobe', 'old-money')} className={`action-tag-btn ${wardrobeStyle === 'old-money' ? 'active-tag' : ''}`}>👔 Old Money</button>
-              <button onClick={() => handleManualStyleChange('wardrobe', 'space-suit')} className={`action-tag-btn ${wardrobeStyle === 'space-suit' ? 'active-tag' : ''}`}>🚀 Space Suit</button>
-              <button onClick={() => handleManualStyleChange('wardrobe', 'cyberpunk')} className={`action-tag-btn ${wardrobeStyle === 'cyberpunk' ? 'active-tag' : ''}`}>🧥 Cyberpunk Jacket</button>
-              <button onClick={() => handleManualStyleChange('wardrobe', 'tactical-armor')} className={`action-tag-btn ${wardrobeStyle === 'tactical-armor' ? 'active-tag' : ''}`}>🛡️ Combat Armor</button>
-              <button onClick={() => handleManualStyleChange('wardrobe', null)} className="action-tag-btn reset">Clear Wardrobe</button>
+              <button onClick={() => handleManualVideoTrigger('Generate a sports car racing loop')} className="action-tag-btn">🏎️ Car Racing</button>
+              <button onClick={() => handleManualVideoTrigger('Generate a space battle sci-fi scene')} className="action-tag-btn">🌌 Sci-Fi Space War</button>
             </div>
           </div>
 
-          {/* Real-time Cinematic Filters */}
+          {/* Keyboard Form override */}
           <div className="card-section">
-            <h3 className="card-title">Cinematic Video & HUD Filters</h3>
-            <div className="grid-buttons">
-              <button onClick={() => handleManualStyleChange('filter', 'cinematic')} className={`action-tag-btn ${activeFilter === 'cinematic' ? 'active-tag' : ''}`}>🎬 Cinematic 2.39:1</button>
-              <button onClick={() => handleManualStyleChange('filter', 'sci-fi')} className={`action-tag-btn ${activeFilter === 'sci-fi' ? 'active-tag' : ''}`}>🛰️ Sci-Fi HUD</button>
-              <button onClick={() => handleManualStyleChange('filter', 'war')} className={`action-tag-btn ${activeFilter === 'war' ? 'active-tag' : ''}`}>💥 Sepia War room</button>
-              <button onClick={() => handleManualStyleChange('filter', 'cyberpunk')} className={`action-tag-btn ${activeFilter === 'cyberpunk' ? 'active-tag' : ''}`}>⚡ Cyber Glitch</button>
-              <button onClick={() => handleManualStyleChange('filter', null)} className="action-tag-btn reset">Clear Theme</button>
-            </div>
-          </div>
-
-          {/* Manual Command Form */}
-          <div className="card-section">
-            <h3 className="card-title">Manual Keyboard Override</h3>
+            <h3 className="card-title">Text Command Override</h3>
             <form onSubmit={handleManualCommandSubmit} style={{ display: 'flex', gap: '0.5rem' }}>
               <input
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
-                placeholder="Type wardrobe or video style..."
+                placeholder="Type command (e.g. style me in old money coat)..."
                 style={{
                   flex: 1,
                   background: 'rgba(0,0,0,0.2)',
@@ -272,12 +408,12 @@ export default function App() {
                   fontWeight: 600
                 }}
               >
-                Apply
+                Send
               </button>
             </form>
           </div>
 
-          {/* Telemetry diagnostics overlay strip */}
+          {/* Telemetry log boxes */}
           <TranscriptOverlay
             status={status}
             transcript={transcript}
@@ -285,6 +421,7 @@ export default function App() {
             latency={latency}
           />
         </section>
+
       </main>
     </div>
   );

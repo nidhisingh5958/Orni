@@ -40,6 +40,17 @@ export const apiClient = {
     return response.json();
   },
 
+  async generateTryon(prompt: string, frameBytes: string, clothBytes?: string, signal?: AbortSignal): Promise<ImageResponse> {
+    const response = await fetch(`${BACKEND_URL}/api/tryon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, frameBytes, clothBytes }),
+      signal
+    });
+    if (!response.ok) throw new Error("Tryon API call failed");
+    return response.json();
+  },
+
   async seedVideoSession(assetId: string, imageBytes: string, prompt?: string, signal?: AbortSignal): Promise<VideoResponse> {
     const response = await fetch(`${BACKEND_URL}/api/video/session`, {
       method: 'POST',
