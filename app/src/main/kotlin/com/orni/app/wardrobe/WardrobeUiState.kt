@@ -17,7 +17,7 @@ sealed interface WardrobeUiState {
     data object ApplyingGarment : WardrobeUiState
 
     /** Generation complete. New speech will supersede this. */
-    data class Success(val resultImageBase64: String) : WardrobeUiState
+    data class Success(val resultImageBase64: String, val canUndo: Boolean = false) : WardrobeUiState
 
     data class Error(val message: String, val canRetry: Boolean = true) : WardrobeUiState
 }

@@ -6,11 +6,16 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.sin
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -42,6 +47,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -234,6 +240,25 @@ fun WardrobeTryOnScreen(
                 Text("Try it on", style = MaterialTheme.typography.labelLarge)
             }
 
+            // Undo button — visible when a previous garment state exists
+            val successState = uiState as? WardrobeUiState.Success
+            AnimatedVisibility(visible = successState?.canUndo == true) {
+                TextButton(
+                    onClick = { viewModel.undo() },
+                    modifier = Modifier.padding(top = 4.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                ) {
+                    Icon(Icons.Filled.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Undo", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+
+            // Waveform — visible while mic is active
+            AnimatedVisibility(visible = micPermissionGranted && uiState !is WardrobeUiState.Error) {
+                WaveformBar(amplitude = amplitude, modifier = Modifier.fillMaxWidth().height(36.dp))
+            }
+
             AnimatedVisibility(visible = uiState is WardrobeUiState.Error) {
                 val error = uiState as? WardrobeUiState.Error
                 Column(modifier = Modifier.padding(top = 12.dp)) {
@@ -261,6 +286,34 @@ fun WardrobeTryOnScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WaveformBar(amplitude: Float, modifier: Modifier = Modifier) {
+    val smoothed by animateFloatAsState(targetValue = amplitude, animationSpec = tween(80), label = "amp")
+    val phase by rememberInfiniteTransition(label = "wave").animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+        label = "phase",
+    )
+    val barColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val midY = size.height / 2f
+        val barCount = 40
+        val barWidth = size.width / (barCount * 2f)
+        for (i in 0 until barCount) {
+            val x = i * size.width / barCount + barWidth
+            val sinVal = sin(phase + i * 0.4f)
+            val barHeight = (smoothed * size.height * 0.9f * ((sinVal + 1f) / 2f)).coerceAtLeast(4f)
+            drawLine(
+                color = barColor,
+                start = Offset(x, midY - barHeight / 2),
+                end = Offset(x, midY + barHeight / 2),
+                strokeWidth = barWidth,
+            )
         }
     }
 }

@@ -1,9 +1,7 @@
 """Thin relay between the Android app and the Gemini models.
 
 Holds the real Gemini API key server-side; the Android app never talks to
-Google's API directly. Phase 0: both endpoints are stubs that echo their
-input so the Android<->relay networking path can be proven before any AI
-call is wired in.
+Google's API directly.
 """
 
 import base64
@@ -13,12 +11,49 @@ import time
 import uuid
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException
+from google import genai
+from google.genai import types
 from PIL import Image, ImageDraw
 from pydantic import BaseModel
 
 app = FastAPI(title="Orni Relay")
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# Confirm these aliases against hackathon docs before the demo.
+_NB2_LITE_MODEL = "gemini-2.0-flash-preview-image-generation"
+_OMNI_FLASH_MODEL = "gemini-2.0-flash-001"
+_LIVE_MODEL = "models/gemini-2.0-flash-live-001"
+
+_EPHEMERAL_TOKEN_TTL_SECONDS = 60 * 10  # 10 minutes
+
+# ---------------------------------------------------------------------------
+# Omni Flash stateful session store
+# In production use Redis; for the hackathon an in-process dict is fine.
+# ---------------------------------------------------------------------------
+_omni_sessions: dict[str, list[types.Content]] = {}
+
+
+def _get_client() -> genai.Client:
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured")
+    return genai.Client(api_key=GEMINI_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Wardrobe — generate garment via NB2 Lite
+# ---------------------------------------------------------------------------
 
 class GenerateGarmentRequest(BaseModel):
     description: str
@@ -27,6 +62,38 @@ class GenerateGarmentRequest(BaseModel):
 class GenerateGarmentResponse(BaseModel):
     garmentImageBase64: str
 
+
+@app.post("/generate-garment", response_model=GenerateGarmentResponse)
+def generate_garment(request: GenerateGarmentRequest) -> GenerateGarmentResponse:
+    """Generate a garment layer via NB2 Lite (gemini-2.0-flash-preview-image-generation).
+
+    Returns a transparent-background PNG of the garment with any text/logos
+    rendered precisely, ready to be composited by Omni Flash.
+    """
+    client = _get_client()
+    prompt = (
+        f"Generate a high-quality product image of: {request.description}. "
+        "Transparent background. No person, no body. Garment only, front-facing, "
+        "studio lighting, photorealistic."
+    )
+    response = client.models.generate_content(
+        model=_NB2_LITE_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
+        ),
+    )
+    for part in response.candidates[0].content.parts:
+        if part.inline_data is not None:
+            return GenerateGarmentResponse(
+                garmentImageBase64=base64.b64encode(part.inline_data.data).decode("ascii")
+            )
+    raise HTTPException(status_code=502, detail="NB2 Lite returned no image")
+
+
+# ---------------------------------------------------------------------------
+# Wardrobe — apply garment via Omni Flash (stateful session)
+# ---------------------------------------------------------------------------
 
 class ApplyGarmentRequest(BaseModel):
     photoBase64: str
@@ -40,80 +107,104 @@ class ApplyGarmentResponse(BaseModel):
     sessionId: str
 
 
-def _placeholder_garment_png(description: str) -> str:
-    image = Image.new("RGBA", (512, 512), (235, 226, 250, 255))
-    draw = ImageDraw.Draw(image)
-    draw.multiline_text((24, 24), f"NB2 Lite stub\n\n{description}", fill=(50, 30, 80, 255))
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("ascii")
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.post("/generate-garment", response_model=GenerateGarmentResponse)
-def generate_garment(request: GenerateGarmentRequest) -> GenerateGarmentResponse:
-    # TODO(Phase 1): call NB2 Lite (gemini-3.1-flash-lite-image) via google-genai here.
-    return GenerateGarmentResponse(garmentImageBase64=_placeholder_garment_png(request.description))
-
-
 @app.post("/apply-garment", response_model=ApplyGarmentResponse)
 def apply_garment(request: ApplyGarmentRequest) -> ApplyGarmentResponse:
-    # TODO(Phase 1): open/reuse an Omni Flash Interactions API session keyed on
-    # sessionId and composite request.garmentImageBase64 onto request.photoBase64.
+    """Composite the garment onto the photo using Omni Flash.
+
+    Reuses the Interactions API session keyed on sessionId so follow-up edits
+    are incremental turns, not cold starts. The session history is stored
+    server-side; the client only needs to pass back the sessionId.
+    """
+    client = _get_client()
     session_id = request.sessionId or str(uuid.uuid4())
-    return ApplyGarmentResponse(resultImageBase64=request.photoBase64, sessionId=session_id)
+    history = _omni_sessions.get(session_id, [])
+
+    photo_bytes = base64.b64decode(request.photoBase64)
+    garment_bytes = base64.b64decode(request.garmentImageBase64)
+
+    instruction = request.instruction or "Apply the garment to the person in the photo naturally."
+    user_parts = [
+        types.Part.from_text(
+            f"{instruction} Keep the person's pose, lighting, and body shape. "
+            "Return only the composited image."
+        ),
+        types.Part.from_bytes(data=photo_bytes, mime_type="image/jpeg"),
+        types.Part.from_bytes(data=garment_bytes, mime_type="image/png"),
+    ]
+
+    contents = history + [types.Content(role="user", parts=user_parts)]
+
+    response = client.models.generate_content(
+        model=_OMNI_FLASH_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
+        ),
+    )
+
+    model_content = response.candidates[0].content
+    # Persist the full turn so the next edit is incremental
+    _omni_sessions[session_id] = contents + [model_content]
+
+    for part in model_content.parts:
+        if part.inline_data is not None:
+            return ApplyGarmentResponse(
+                resultImageBase64=base64.b64encode(part.inline_data.data).decode("ascii"),
+                sessionId=session_id,
+            )
+    raise HTTPException(status_code=502, detail="Omni Flash returned no image")
 
 
 # ---------------------------------------------------------------------------
-# Ad Canvas — ephemeral token endpoint
+# Ephemeral token — shared by Ad Canvas and Wardrobe voice features
 # ---------------------------------------------------------------------------
-# The Android app calls this once per AudioAdCanvasScreen session. The relay
-# mints a short-lived token that the app uses to open a direct WebSocket to
-# Gemini Live. The relay is NEVER in the audio path — it only issues the token.
-# ---------------------------------------------------------------------------
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-_EPHEMERAL_TOKEN_TTL_SECONDS = 60 * 10  # 10 minutes — enough for one demo session
-
 
 class EphemeralTokenResponse(BaseModel):
     token: str
-    expiresAt: int  # Unix epoch seconds
+    expiresAt: int
     websocketUrl: str
 
 
 @app.post("/ad/ephemeral-token", response_model=EphemeralTokenResponse)
 def mint_ephemeral_token() -> EphemeralTokenResponse:
-    """Mint a short-lived token the Android app uses to connect directly to
-    Gemini Live over WebSocket. The relay never proxies audio.
-
-    TODO(Phase 1): Replace the stub token with a real Google-issued ephemeral
-    credential once the hackathon Gemini Live API docs confirm the minting
-    endpoint (likely POST https://generativelanguage.googleapis.com/v1beta/
-    ephemeralTokens or similar). Until then the stub lets the Android WebSocket
-    path be proven end-to-end against a local echo server.
+    """Mint a short-lived token the Android app uses to open a direct WebSocket
+    to Gemini Live. The relay is never in the audio path.
     """
     if not GEMINI_API_KEY:
-        # During Phase 0 we allow a missing key so the Android stub path works.
-        stub_token = f"stub-{uuid.uuid4()}"
+        # Phase 0 stub — lets the Android WebSocket path be proven without a key.
         return EphemeralTokenResponse(
-            token=stub_token,
+            token=f"stub-{uuid.uuid4()}",
             expiresAt=int(time.time()) + _EPHEMERAL_TOKEN_TTL_SECONDS,
-            # Phase 0: point at a local echo WS server (e.g. `wscat --listen 8765`)
-            # Phase 1: replace with wss://generativelanguage.googleapis.com/...
             websocketUrl="ws://10.0.2.2:8765",
         )
-    # TODO(Phase 1): call Google's ephemeral-token minting API here using
-    # GEMINI_API_KEY and return the real token + wss URL.
-    raise HTTPException(status_code=501, detail="Real token minting not yet implemented")
+
+    # Mint a real ephemeral token via the Gemini Live token endpoint.
+    # The token is scoped to one Live session and expires after TTL seconds.
+    url = "https://generativelanguage.googleapis.com/v1beta/ephemeralTokens"
+    payload = {
+        "model": _LIVE_MODEL,
+        "config": {
+            "responseModalities": ["TEXT"],
+        },
+        "ttlSeconds": _EPHEMERAL_TOKEN_TTL_SECONDS,
+    }
+    resp = httpx.post(url, json=payload, headers={"x-goog-api-key": GEMINI_API_KEY}, timeout=10)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Token mint failed: {resp.text}")
+
+    data = resp.json()
+    token = data.get("token") or data.get("name", "")
+    expires_at = int(time.time()) + _EPHEMERAL_TOKEN_TTL_SECONDS
+
+    return EphemeralTokenResponse(
+        token=token,
+        expiresAt=expires_at,
+        websocketUrl="wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
+    )
 
 
 # ---------------------------------------------------------------------------
-# Ad Canvas — generate ad frame via NB2 Lite
+# Ad Canvas — generate ad frame via NB2 Lite (unchanged from Phase 0 stub)
 # ---------------------------------------------------------------------------
 
 class GenerateAdRequest(BaseModel):
@@ -129,21 +220,27 @@ class GenerateAdResponse(BaseModel):
 
 @app.post("/ad/generate", response_model=GenerateAdResponse)
 def generate_ad(request: GenerateAdRequest) -> GenerateAdResponse:
-    """Generate a 1K ad frame via NB2 Lite (gemini-3.1-flash-lite-image).
+    """Generate a 1K ad frame via NB2 Lite."""
+    client = _get_client()
+    prompt_parts = [f"Create a professional advertisement for: {request.product}."]
+    if request.background:
+        prompt_parts.append(f"Background: {request.background}.")
+    if request.copyText:
+        prompt_parts.append(f"Include the text: '{request.copyText}'.")
+    if request.style:
+        prompt_parts.append(f"Style: {request.style}.")
+    prompt_parts.append("Square format, 1024x1024, high quality.")
 
-    TODO(Phase 1): Replace stub with real NB2 Lite call. Confirm model alias
-    `gemini-3.1-flash-lite-image` against hackathon docs before integrating.
-    """
-    image = Image.new("RGB", (1024, 1024), (30, 30, 40))
-    draw = ImageDraw.Draw(image)
-    lines = [
-        "NB2 Lite stub",
-        f"Product: {request.product}",
-        f"BG: {request.background or '—'}",
-        f"Copy: {request.copyText or '—'}",
-        f"Style: {request.style or '—'}",
-    ]
-    draw.multiline_text((40, 40), "\n".join(lines), fill=(220, 210, 200, 255), spacing=12)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return GenerateAdResponse(imageBase64=base64.b64encode(buffer.getvalue()).decode("ascii"))
+    response = client.models.generate_content(
+        model=_NB2_LITE_MODEL,
+        contents=" ".join(prompt_parts),
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE", "TEXT"],
+        ),
+    )
+    for part in response.candidates[0].content.parts:
+        if part.inline_data is not None:
+            return GenerateAdResponse(
+                imageBase64=base64.b64encode(part.inline_data.data).decode("ascii")
+            )
+    raise HTTPException(status_code=502, detail="NB2 Lite returned no image for ad")

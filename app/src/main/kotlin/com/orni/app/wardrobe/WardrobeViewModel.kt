@@ -24,7 +24,6 @@ class WardrobeViewModel(
     private val _selectedPhotoUri = MutableStateFlow<Uri?>(null)
     val selectedPhotoUri: StateFlow<Uri?> = _selectedPhotoUri.asStateFlow()
 
-    // Waveform amplitude for the listening indicator (0f–1f)
     private val _amplitude = MutableStateFlow(0f)
     val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
 
@@ -38,22 +37,28 @@ class WardrobeViewModel(
     private var generationJob: Job? = null
     private var intentDebounceJob: Job? = null
     private var liveSession: WardrobeGeminiLiveSession? = null
+
+    // Intent + undo state
     private var stableIntent: WardrobeIntent? = null
+    private var pendingIntent: WardrobeIntent? = null  // accumulates until TurnComplete
+    // Undo stack: up to 2 previous (resultBase64, sessionId) pairs
+    private val undoStack = ArrayDeque<Pair<String, String>>(2)
 
     // ---------------------------------------------------------------------------
     // Photo selection
     // ---------------------------------------------------------------------------
 
     fun onPhotoSelected(uri: Uri, photoBase64: String) {
-        // New photo = new Omni Flash session; don't bleed edits across photos.
         sessionId = null
         currentPhotoBase64 = photoBase64
         _selectedPhotoUri.value = uri
+        undoStack.clear()
+        stableIntent = null
         _uiState.value = if (sessionJob?.isActive == true) WardrobeUiState.Listening else WardrobeUiState.Idle
     }
 
     // ---------------------------------------------------------------------------
-    // Text input path (existing flow — unchanged)
+    // Text input path (unchanged)
     // ---------------------------------------------------------------------------
 
     fun onDescriptionSubmitted(description: String) {
@@ -67,14 +72,24 @@ class WardrobeViewModel(
     }
 
     fun retry() {
-        stableIntent?.let { triggerGeneration(it) } ?: startVoiceSession()
+        val lastErr = _uiState.value as? WardrobeUiState.Error
+        if (lastErr != null && stableIntent != null) triggerGeneration(stableIntent!!)
+        else if (sessionJob?.isActive != true) startVoiceSession()
     }
+
+    fun undo() {
+        if (undoStack.isEmpty()) return
+        val (prevResult, prevSession) = undoStack.removeLast()
+        sessionId = prevSession
+        _uiState.value = WardrobeUiState.Success(prevResult)
+    }
+
+    val canUndo: Boolean get() = undoStack.isNotEmpty()
 
     // ---------------------------------------------------------------------------
     // Voice session lifecycle
     // ---------------------------------------------------------------------------
 
-    /** Call once RECORD_AUDIO permission is confirmed. */
     fun startVoiceSession() {
         if (sessionJob?.isActive == true) return
         sessionJob = viewModelScope.launch { openSessionWithRetry() }
@@ -116,9 +131,23 @@ class WardrobeViewModel(
         session.events().collect { event ->
             when (event) {
                 is WardrobeGeminiLiveSession.SessionEvent.Transcript ->
-                    onTranscript(event.text, intent = null)
+                    onPartialTranscript(event.text)
+
                 is WardrobeGeminiLiveSession.SessionEvent.IntentUpdate ->
-                    onTranscript(event.intent.toDescription(), intent = event.intent)
+                    onIntentUpdate(event.intent)
+
+                // Model finished its turn — lock the pending intent and generate.
+                WardrobeGeminiLiveSession.SessionEvent.TurnComplete ->
+                    pendingIntent?.let { lockAndGenerate(it) }
+
+                // Model was interrupted (user spoke again) — discard pending intent;
+                // the new speech will produce a fresh IntentUpdate.
+                WardrobeGeminiLiveSession.SessionEvent.Interrupted -> {
+                    intentDebounceJob?.cancel()
+                    pendingIntent = null
+                    _uiState.value = WardrobeUiState.Listening
+                }
+
                 WardrobeGeminiLiveSession.SessionEvent.Disconnected -> {
                     micJob?.cancel()
                     liveSession = null
@@ -148,40 +177,57 @@ class WardrobeViewModel(
     }
 
     // ---------------------------------------------------------------------------
-    // Intent handling + interruption logic
+    // Intent handling — Phase 2 correction logic
     // ---------------------------------------------------------------------------
 
-    /**
-     * Called on every transcript/intent update from the WebSocket.
-     *
-     * Interruption rule: new speech cancels the debounce (and any in-flight
-     * generation) — the latest intent always supersedes, never queues.
-     */
-    private fun onTranscript(transcript: String, intent: WardrobeIntent?) {
-        val merged = intent?.let { newer ->
-            stableIntent?.mergeWith(newer) ?: newer
+    private fun onPartialTranscript(text: String) {
+        // New speech while generating → cancel in-flight generation (supersede, don't queue)
+        if (generationJob?.isActive == true) {
+            generationJob?.cancel()
+            Log.d(TAG, "Generation superseded by new speech")
         }
-        _uiState.value = WardrobeUiState.IntentStabilizing(transcript, merged)
+        _uiState.value = WardrobeUiState.IntentStabilizing(text, pendingIntent)
+    }
 
-        intentDebounceJob?.cancel()
-        if (merged != null) {
-            intentDebounceJob = viewModelScope.launch {
-                delay(INTENT_DEBOUNCE_MS)
-                triggerGeneration(merged)
-            }
+    private fun onIntentUpdate(intent: WardrobeIntent) {
+        // Merge with stable intent for modify actions so attributes accumulate.
+        val merged = when (intent.action) {
+            WardrobeIntent.Action.Modify -> stableIntent?.mergeWith(intent) ?: intent
+            WardrobeIntent.Action.Add, WardrobeIntent.Action.Replace -> intent
         }
+        pendingIntent = merged
+        _uiState.value = WardrobeUiState.IntentStabilizing(merged.toDescription(), merged)
+
+        // Debounce as a safety net — fires if TurnComplete never arrives (e.g. echo server).
+        intentDebounceJob?.cancel()
+        intentDebounceJob = viewModelScope.launch {
+            delay(INTENT_DEBOUNCE_MS)
+            lockAndGenerate(merged)
+        }
+    }
+
+    private fun lockAndGenerate(intent: WardrobeIntent) {
+        intentDebounceJob?.cancel()
+        pendingIntent = null
+        triggerGeneration(intent)
     }
 
     private fun triggerGeneration(intent: WardrobeIntent) {
         val photoBase64 = currentPhotoBase64 ?: return
-        // Cancel any in-flight generation — the new intent supersedes it.
         generationJob?.cancel()
         stableIntent = intent
         _uiState.value = WardrobeUiState.GeneratingGarment
 
+        // For modify, prepend the existing description so NB2 Lite has full context.
+        val description = if (intent.action == WardrobeIntent.Action.Modify && stableIntent != null) {
+            "${stableIntent!!.toDescription()}, ${intent.toDescription()}"
+        } else {
+            intent.toDescription()
+        }
+
         generationJob = viewModelScope.launch {
-            repository.generateGarment(intent.toDescription())
-                .onSuccess { garmentBase64 -> applyGarment(photoBase64, garmentBase64, intent.toDescription()) }
+            repository.generateGarment(description)
+                .onSuccess { garmentBase64 -> applyGarment(photoBase64, garmentBase64, description) }
                 .onFailure {
                     Log.e(TAG, "Generation failed: ${it.message}")
                     _uiState.value = WardrobeUiState.Error(it.message ?: "Generation failed")
@@ -197,8 +243,14 @@ class WardrobeViewModel(
             sessionId = sessionId,
             instruction = instruction,
         ).onSuccess { (resultImageBase64, newSessionId) ->
+            // Push current result onto undo stack before replacing it
+            val currentSuccess = _uiState.value as? WardrobeUiState.Success
+            if (currentSuccess != null && sessionId != null) {
+                if (undoStack.size >= 2) undoStack.removeFirst()
+                undoStack.addLast(currentSuccess.resultImageBase64 to sessionId!!)
+            }
             sessionId = newSessionId
-            _uiState.value = WardrobeUiState.Success(resultImageBase64)
+            _uiState.value = WardrobeUiState.Success(resultImageBase64, canUndo = undoStack.isNotEmpty())
         }.onFailure {
             _uiState.value = WardrobeUiState.Error(it.message ?: "Failed to apply garment")
         }
