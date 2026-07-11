@@ -3,7 +3,7 @@ import { ai } from '../services/geminiClient';
 
 export const intentRouter = Router();
 
-intentRouter.post('/parse', async (req, res) => {
+intentRouter.post('/intent/parse', async (req, res) => {
   const { text } = req.body;
 
   if (!text) {
