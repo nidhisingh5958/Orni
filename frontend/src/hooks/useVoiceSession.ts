@@ -10,13 +10,15 @@ export function useVoiceSession(callbacks: {
 
   const recognitionRef = useRef<any>(null);
   const isListeningRef = useRef<boolean>(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const accumulatedTextRef = useRef<string>('');
 
   const startSession = useCallback(async (existingStream?: MediaStream | null) => {
     setError(null);
     setTranscript('');
     setStatus('connecting');
+    accumulatedTextRef.current = '';
 
-    // Resolve native speech recognition constructors in web environments
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
@@ -27,7 +29,7 @@ export function useVoiceSession(callbacks: {
 
     try {
       const rec = new SpeechRecognition();
-      rec.continuous = false; // Stop listening automatically once the user finishes speaking
+      rec.continuous = true; // Stay active to prevent instant disconnected errors on short silences
       rec.interimResults = true;
       rec.lang = 'en-US';
 
@@ -36,30 +38,67 @@ export function useVoiceSession(callbacks: {
         isListeningRef.current = true;
       };
 
+      const handleSpeechFinalized = (finalText: string) => {
+        if (finalText.trim()) {
+          console.log("[useVoiceSession] Speech finalized text:", finalText);
+          callbacks.onIntentText(finalText);
+        }
+        // Restart speech text accumulator for subsequent runs
+        accumulatedTextRef.current = '';
+        setTranscript('');
+      };
+
       rec.onresult = (event: any) => {
         let interimTranscript = '';
+        let finalChunk = '';
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const text = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            const final = event.results[i][0].transcript;
-            setTranscript(final);
-            callbacks.onIntentText(final);
+            finalChunk = text;
           } else {
-            interimTranscript += event.results[i][0].transcript;
-            setTranscript(interimTranscript);
+            interimTranscript += text;
           }
+        }
+
+        // Build running transcript state
+        const currentText = finalChunk || interimTranscript;
+        if (currentText.trim()) {
+          setTranscript(currentText);
+          accumulatedTextRef.current = currentText;
+
+          // Clear previous silence countdown
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+          }
+
+          // Debounce: if user stops speaking for 1.5 seconds, automatically process command
+          silenceTimerRef.current = setTimeout(() => {
+            if (accumulatedTextRef.current.trim()) {
+              handleSpeechFinalized(accumulatedTextRef.current);
+            }
+          }, 1500);
         }
       };
 
       rec.onerror = (event: any) => {
-        console.error("Speech recognition error:", event.error);
-        if (event.error !== 'no-speech') {
-          setError(`Microphone error: ${event.error}`);
+        console.warn("[useVoiceSession] Recognition error event:", event.error);
+        
+        // Ignore 'no-speech' and 'aborted' status errors to keep the mic session active
+        if (event.error === 'no-speech') {
+          return; 
         }
+
+        setError(`Microphone issue: ${event.error}`);
         setStatus('disconnected');
         isListeningRef.current = false;
       };
 
       rec.onend = () => {
+        // If there is any remaining un-processed text when mic finishes, process it now
+        if (accumulatedTextRef.current.trim()) {
+          handleSpeechFinalized(accumulatedTextRef.current);
+        }
         setStatus('disconnected');
         isListeningRef.current = false;
       };
@@ -75,16 +114,28 @@ export function useVoiceSession(callbacks: {
   }, [callbacks]);
 
   const stopSession = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
+    if (accumulatedTextRef.current.trim()) {
+      const remaining = accumulatedTextRef.current;
+      accumulatedTextRef.current = '';
+      callbacks.onIntentText(remaining);
+    }
     setStatus('disconnected');
     isListeningRef.current = false;
-  }, []);
+  }, [callbacks]);
 
   useEffect(() => {
     return () => {
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
