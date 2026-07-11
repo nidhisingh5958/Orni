@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class WardrobeViewModel(
     private val repository: WardrobeRepository = WardrobeRepository(),
@@ -260,14 +261,21 @@ class WardrobeViewModel(
     }
 
     private fun Throwable.toUserMessage(default: String): String {
+        val serverDetail = if (this is retrofit2.HttpException) {
+            runCatching { response()?.errorBody()?.string() }.getOrNull()
+        } else null
+
         return when {
+            serverDetail?.contains("not configured", ignoreCase = true) == true || 
+            message?.contains("503") == true ->
+                "Backend Error: GEMINI_API_KEY is not set on the server."
             message?.contains("Unable to resolve host", ignoreCase = true) == true ->
                 "Network error: Could not reach server. Please check your internet connection."
             message?.contains("timeout", ignoreCase = true) == true ->
                 "Connection timed out. The server might be busy, please try again."
             message?.contains("Failed to connect", ignoreCase = true) == true ->
                 "Could not connect to the wardrobe service. Please try again later."
-            else -> message ?: default
+            else -> serverDetail ?: message ?: default
         }
     }
 

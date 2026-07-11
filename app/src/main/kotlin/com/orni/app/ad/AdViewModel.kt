@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class AdViewModel(
     private val repository: AdRepository = AdRepository(),
@@ -66,7 +67,7 @@ class AdViewModel(
         val tokenResult = repository.mintEphemeralToken()
         tokenResult.onFailure {
             Log.e(TAG, "Token mint failed: ${it.message}")
-            _uiState.value = AdUiState.Error("Could not connect — check your network", canRetry = true)
+            _uiState.value = AdUiState.Error(it.toUserMessage("Could not connect — check your network"), canRetry = true)
             return
         }
         val tokenData = tokenResult.getOrThrow()
@@ -82,6 +83,11 @@ class AdViewModel(
                 GeminiLiveSession.SessionEvent.TurnComplete     -> {
                     intentDebounceJob?.cancel()
                     pendingIntent?.let { lockAndGenerate(it) }
+                }
+                GeminiLiveSession.SessionEvent.Interrupted -> {
+                    intentDebounceJob?.cancel()
+                    pendingIntent = null
+                    _uiState.value = AdUiState.Listening
                 }
                 GeminiLiveSession.SessionEvent.Disconnected     -> {
                     micJob?.cancel()
@@ -186,7 +192,7 @@ class AdViewModel(
                 }
                 .onFailure {
                     Log.e(TAG, "Generate failed: ${it.message}")
-                    _uiState.value = AdUiState.Error(it.message ?: "Generation failed")
+                    _uiState.value = AdUiState.Error(it.toUserMessage("Generation failed"))
                 }
         }
     }
@@ -219,7 +225,7 @@ class AdViewModel(
                 }
                 .onFailure {
                     Log.e(TAG, "Animate failed: ${it.message}")
-                    _uiState.value = AdUiState.Error(it.message ?: "Animation failed")
+                    _uiState.value = AdUiState.Error(it.toUserMessage("Animation failed"))
                 }
         }
     }
@@ -245,7 +251,7 @@ class AdViewModel(
                 }
                 .onFailure {
                     Log.e(TAG, "Localize failed: ${it.message}")
-                    _uiState.value = AdUiState.Error(it.message ?: "Localization failed")
+                    _uiState.value = AdUiState.Error(it.toUserMessage("Localization failed"))
                 }
         }
     }
@@ -253,6 +259,25 @@ class AdViewModel(
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
+
+    private fun Throwable.toUserMessage(default: String): String {
+        val serverDetail = if (this is HttpException) {
+            runCatching { response()?.errorBody()?.string() }.getOrNull()
+        } else null
+
+        return when {
+            serverDetail?.contains("not configured", ignoreCase = true) == true ||
+                    message?.contains("503") == true ->
+                "Backend Error: GEMINI_API_KEY is not set on the server."
+            message?.contains("Unable to resolve host", ignoreCase = true) == true ->
+                "Network error: Could not reach server. Please check your internet connection."
+            message?.contains("timeout", ignoreCase = true) == true ->
+                "Connection timed out. The server might be busy, please try again."
+            message?.contains("Failed to connect", ignoreCase = true) == true ->
+                "Could not connect to the ad service. Please try again later."
+            else -> serverDetail ?: message ?: default
+        }
+    }
 
     private fun ByteArray.rms(): Float {
         if (isEmpty()) return 0f

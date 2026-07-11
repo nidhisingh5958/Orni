@@ -16,6 +16,9 @@ from google import genai
 from google.genai import types
 from PIL import Image, ImageDraw
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="Orni Relay")
 

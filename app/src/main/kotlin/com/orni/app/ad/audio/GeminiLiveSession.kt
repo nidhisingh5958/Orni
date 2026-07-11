@@ -29,6 +29,8 @@ class GeminiLiveSession(private val websocketUrl: String, private val token: Str
         data class Transcript(val text: String) : SessionEvent
         data class IntentUpdate(val intent: AdIntent) : SessionEvent
         data object TurnComplete : SessionEvent
+        /** Model was interrupted mid-turn — discard partial intent. */
+        data object Interrupted : SessionEvent
         data object Disconnected : SessionEvent
     }
 
@@ -117,7 +119,8 @@ class GeminiLiveSession(private val websocketUrl: String, private val token: Str
         val serverContent = json.optJSONObject("serverContent") ?: return@runCatching events
 
         if (serverContent.optBoolean("interrupted", false)) {
-            return@runCatching events // discard partial, new speech coming
+            events += SessionEvent.Interrupted
+            return@runCatching events
         }
 
         val parts = serverContent.optJSONObject("modelTurn")?.optJSONArray("parts")
