@@ -18,7 +18,7 @@ android {
 
         // Base URL of the backend relay. Never point this at Google's API directly -
         // the relay holds the real Gemini API key server-side.
-        buildConfigField("String", "RELAY_BASE_URL", "\"http://10.0.2.2:8000/\"")
+        buildConfigField("String", "RELAY_BASE_URL", "\"http://ec2-3-110-82-68.ap-south-1.compute.amazonaws.com:8000/\"")
     }
 
     buildTypes {
