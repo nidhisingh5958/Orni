@@ -82,12 +82,12 @@ export function useVoiceSession(callbacks: {
       };
 
       rec.onerror = (event: any) => {
-        console.warn("[useVoiceSession] Recognition error event:", event.error);
-        
         // Ignore 'no-speech' and 'aborted' status errors to keep the mic session active
         if (event.error === 'no-speech') {
           return; 
         }
+
+        console.warn("[useVoiceSession] Recognition error event:", event.error);
 
         setError(`Microphone issue: ${event.error}`);
         setStatus('disconnected');
