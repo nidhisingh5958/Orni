@@ -20,3 +20,14 @@ backend/**/__pycache__/
 
 # Env / secrets
 .env
+
+# Local logs and Python cache artifacts
+*.log
+*.pid
+*.out
+*.err
+*.coverage
+*.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Allows cleartext HTTP only to the Android emulator's host-loopback alias, so the
-  Phase 0 relay stub can be run locally without standing up TLS first. Remove this
-  domain (or point RELAY_BASE_URL at https) before shipping a real build.
+  Allows cleartext HTTP only to the deployed relay host, so the Android app can
+  reach the backend while it is still served over HTTP. Point RELAY_BASE_URL at
+  https before shipping a real build.
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">10.0.2.2</domain>
-        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">ec2-3-110-82-68.ap-south-1.compute.amazonaws.com</domain>
     </domain-config>
 </network-security-config>
