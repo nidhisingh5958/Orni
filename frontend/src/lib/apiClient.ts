@@ -104,5 +104,16 @@ export const apiClient = {
     });
     if (!response.ok) throw new Error("Intent parsing failed");
     return response.json();
+  },
+
+  async transcribeAudio(audioBytes: string, mimeType?: string, signal?: AbortSignal): Promise<{ text: string }> {
+    const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioBytes, mimeType }),
+      signal
+    });
+    if (!response.ok) throw new Error("Audio transcription call failed");
+    return response.json();
   }
 };

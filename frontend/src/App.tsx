@@ -113,7 +113,11 @@ export default function App() {
         // Dynamically select outfit overlay placeholder based on Gemini's identified subject
         const sub = parsed.subject.toLowerCase();
         let overlayPlaceholder: any = null;
-        if (sub.includes('money') || sub.includes('suit') || sub.includes('coat') || sub.includes('blazer')) {
+        if (sub.includes('glasses') || sub.includes('shades') || sub.includes('sunglasses') || sub.includes('spectacles')) {
+          overlayPlaceholder = 'glasses';
+        } else if (sub.includes('shirt') || sub.includes('t-shirt') || sub.includes('top') || sub.includes('clothing')) {
+          overlayPlaceholder = 'shirt';
+        } else if (sub.includes('money') || sub.includes('suit') || sub.includes('coat') || sub.includes('blazer')) {
           overlayPlaceholder = 'old-money';
         } else if (sub.includes('space') || sub.includes('astronaut')) {
           overlayPlaceholder = 'space-suit';
@@ -203,8 +207,8 @@ export default function App() {
   };
 
   // Manual Trigger options for testing in standard demo environments
-  const handleManualTryonTrigger = (styleName: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor') => {
-    processUserTextCommand(`wear an ${styleName.replace('-', ' ')}`);
+  const handleManualTryonTrigger = (styleName: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | 'glasses' | 'shirt') => {
+    processUserTextCommand(`wear ${styleName === 'glasses' ? 'glasses' : styleName === 'shirt' ? 'a green shirt' : 'an ' + styleName.replace('-', ' ')}`);
   };
 
   // Manual Video generation test
@@ -330,6 +334,8 @@ export default function App() {
               <button onClick={() => handleManualTryonTrigger('space-suit')} className="action-tag-btn">🚀 Space Suit</button>
               <button onClick={() => handleManualTryonTrigger('cyberpunk')} className="action-tag-btn">🧥 Cyberpunk Jacket</button>
               <button onClick={() => handleManualTryonTrigger('tactical-armor')} className="action-tag-btn">🛡️ Combat Vest</button>
+              <button onClick={() => handleManualTryonTrigger('glasses')} className="action-tag-btn">🕶️ Glasses</button>
+              <button onClick={() => handleManualTryonTrigger('shirt')} className="action-tag-btn">👕 Green T-Shirt</button>
             </div>
           </div>
         </section>

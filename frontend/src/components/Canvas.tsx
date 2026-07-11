@@ -147,8 +147,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         ctx.setLineDash([]); // Reset line dashes
       }
 
-      // 3. Draw Digital Wardrobe Try-On Overlays (Draw only as instant placeholder overlays before the real AI Try-On loads)
-      if (!tryonImageSrc && wardrobeStyle) {
+      // 3. Draw Digital Wardrobe Try-On & Accessory Overlays (Always drawn to support live user movement over webcam/try-on backdrops)
+      if (wardrobeStyle) {
         if (wardrobeStyle === 'old-money') {
           // Luxury Linen Cream Blazer with Gold Amber Trims
           ctx.fillStyle = 'rgba(248, 250, 252, 0.95)'; // linen cream
@@ -311,6 +311,66 @@ export const Canvas: React.FC<CanvasProps> = ({
           ctx.fillStyle = '#fbbf24';
           ctx.fillRect(420, 490, 24, 12);
           ctx.fillRect(580, 490, 24, 12);
+
+        } else if ((wardrobeStyle as string) === 'glasses') {
+          // Aviator / Cyberpunk Sunglasses centered around the head calibration guide (head center: x=512, y=330)
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; // dark lenses
+          ctx.strokeStyle = '#3b82f6'; // neon blue frames
+          ctx.lineWidth = 4;
+
+          // Left Lens
+          ctx.beginPath();
+          ctx.arc(460, 330, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Right Lens
+          ctx.beginPath();
+          ctx.arc(564, 330, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Frame bridge connecting lenses
+          ctx.beginPath();
+          ctx.moveTo(490, 325);
+          ctx.lineTo(534, 325);
+          ctx.stroke();
+
+          // Side bars going backwards
+          ctx.beginPath();
+          ctx.moveTo(430, 330);
+          ctx.lineTo(400, 320);
+          ctx.moveTo(594, 330);
+          ctx.lineTo(624, 320);
+          ctx.stroke();
+
+        } else if ((wardrobeStyle as string) === 'shirt') {
+          // Green Crewneck T-Shirt centered on the shoulder guide
+          ctx.fillStyle = '#15803d'; // forest green
+          ctx.strokeStyle = '#166534'; // darker green lining
+          ctx.lineWidth = 4;
+
+          // Shirt body
+          ctx.beginPath();
+          ctx.moveTo(280, 710);
+          ctx.quadraticCurveTo(390, 500, 415, 440);
+          
+          // Collar curve
+          ctx.quadraticCurveTo(512, 470, 609, 440);
+
+          ctx.quadraticCurveTo(634, 500, 744, 710);
+          ctx.lineTo(630, 960);
+          ctx.lineTo(394, 960);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Collar ribbing line
+          ctx.strokeStyle = '#15c03d';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.quadraticCurveTo(512, 475, 609, 440);
+          ctx.stroke();
         }
       }
 

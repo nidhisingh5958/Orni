@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { apiClient } from '../lib/apiClient';
 
 export function useVoiceSession(callbacks: {
   onIntentText: (text: string) => void;
@@ -13,23 +14,88 @@ export function useVoiceSession(callbacks: {
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const accumulatedTextRef = useRef<string>('');
 
+  // MediaRecorder backup elements
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   const startSession = useCallback(async (existingStream?: MediaStream | null) => {
     setError(null);
     setTranscript('');
     setStatus('connecting');
     accumulatedTextRef.current = '';
+    audioChunksRef.current = [];
 
+    // 1. Try to start the MediaRecorder background backup tracker if audio stream track is available
+    if (existingStream) {
+      try {
+        const audioTracks = existingStream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          const audioStream = new MediaStream([audioTracks[0]]);
+          const options = { mimeType: 'audio/webm' };
+          
+          let mediaRecorder: MediaRecorder;
+          try {
+            mediaRecorder = new MediaRecorder(audioStream, options);
+          } catch (e) {
+            mediaRecorder = new MediaRecorder(audioStream);
+          }
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              audioChunksRef.current.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = async () => {
+            // Process the recorded audio payload if SpeechRecognition failed to return any text
+            if (!accumulatedTextRef.current.trim() && audioChunksRef.current.length > 0) {
+              try {
+                console.log("[useVoiceSession] Fallback: transcribing recorded audio chunks...");
+                const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+                
+                // Read blob to base64
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = async () => {
+                  const base64Data = (reader.result as string).split(',')[1];
+                  try {
+                    const result = await apiClient.transcribeAudio(base64Data, audioBlob.type);
+                    if (result.text && result.text.trim()) {
+                      console.log("[useVoiceSession] Fallback translation result:", result.text);
+                      setTranscript(result.text);
+                      callbacks.onIntentText(result.text);
+                    }
+                  } catch (err) {
+                    console.error("[useVoiceSession] Fallback transcription API failed:", err);
+                  }
+                };
+              } catch (blobErr) {
+                console.error("[useVoiceSession] Fallback blob builder failed:", blobErr);
+              }
+            }
+          };
+
+          mediaRecorderRef.current = mediaRecorder;
+          mediaRecorder.start(250); // Collect data in 250ms chunks
+        }
+      } catch (recErr) {
+        console.warn("[useVoiceSession] Failed to initialize MediaRecorder backup tracker:", recErr);
+      }
+    }
+
+    // 2. Start the primary browser SpeechRecognition
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setError("Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
-      setStatus('disconnected');
+      console.warn("[useVoiceSession] webkitSpeechRecognition missing, proceeding with backup recorder only.");
+      setStatus('connected');
+      isListeningRef.current = true;
       return;
     }
 
     try {
       const rec = new SpeechRecognition();
-      rec.continuous = true; // Stay active to prevent instant disconnected errors on short silences
+      rec.continuous = true;
       rec.interimResults = true;
       rec.lang = 'en-US';
 
@@ -43,7 +109,6 @@ export function useVoiceSession(callbacks: {
           console.log("[useVoiceSession] Speech finalized text:", finalText);
           callbacks.onIntentText(finalText);
         }
-        // Restart speech text accumulator for subsequent runs
         accumulatedTextRef.current = '';
         setTranscript('');
       };
@@ -61,18 +126,15 @@ export function useVoiceSession(callbacks: {
           }
         }
 
-        // Build running transcript state
         const currentText = finalChunk || interimTranscript;
         if (currentText.trim()) {
           setTranscript(currentText);
           accumulatedTextRef.current = currentText;
 
-          // Clear previous silence countdown
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current);
           }
 
-          // Debounce: if user stops speaking for 1.5 seconds, automatically process command
           silenceTimerRef.current = setTimeout(() => {
             if (accumulatedTextRef.current.trim()) {
               handleSpeechFinalized(accumulatedTextRef.current);
@@ -82,16 +144,13 @@ export function useVoiceSession(callbacks: {
       };
 
       rec.onerror = (event: any) => {
-        // Ignore 'no-speech' and 'aborted' status errors to keep the mic session active
+        // Suppress no-speech errors to stay active and rely on MediaRecorder backing
         if (event.error === 'no-speech') {
           return; 
         }
 
-        console.warn("[useVoiceSession] Recognition error event:", event.error);
-
-        setError(`Microphone issue: ${event.error}`);
-        setStatus('disconnected');
-        isListeningRef.current = false;
+        console.warn("[useVoiceSession] Recognition error:", event.error);
+        // We do not disconnect immediately on errors to allow MediaRecorder fallback processing
       };
 
       rec.onend = () => {
@@ -107,9 +166,9 @@ export function useVoiceSession(callbacks: {
       rec.start();
     } catch (e: any) {
       console.error("Failed to start SpeechRecognition:", e);
-      setError(e.message || "Failed to start microphone speech parser.");
-      setStatus('disconnected');
-      isListeningRef.current = false;
+      // Fail gracefully: Let status remain 'connected' so backup MediaRecorder can run
+      setStatus('connected');
+      isListeningRef.current = true;
     }
   }, [callbacks]);
 
@@ -121,6 +180,10 @@ export function useVoiceSession(callbacks: {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
     }
     if (accumulatedTextRef.current.trim()) {
       const remaining = accumulatedTextRef.current;
@@ -138,6 +201,9 @@ export function useVoiceSession(callbacks: {
       }
       if (recognitionRef.current) {
         recognitionRef.current.stop();
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
       }
     };
   }, []);
