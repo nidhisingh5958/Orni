@@ -20,9 +20,9 @@ Defined at the top of `backend/app/main.py`. Confirm against hackathon docs befo
 
 | alias constant | current value | used by |
 |---|---|---|
-| `_NB2_LITE_MODEL` | `gemini-2.0-flash-preview-image-generation` | `/generate-garment`, `/ad/generate` |
-| `_OMNI_FLASH_MODEL` | `gemini-2.0-flash-preview-image-generation` | `/apply-garment` |
-| `_LIVE_MODEL` | `gemini-2.0-flash-live-001` | referenced in Android only |
+| `_NB2_LITE_MODEL` | `gemini-3.1-flash-lite-image` | `/generate-garment`, `/ad/generate` |
+| `_OMNI_FLASH_MODEL` | `gemini-omni-flash-preview` | `/apply-garment` |
+| `_LIVE_MODEL` | `gemini-3.1-flash-live-preview` | referenced in Android only |
 
 ## Endpoints
 

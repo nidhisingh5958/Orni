@@ -104,9 +104,9 @@ demo day** — a wrong alias is the most common first-hour blocker:
 
 | Role | Current string |
 |---|---|
-| NB2 Lite (garment/ad frames) | `gemini-2.0-flash-preview-image-generation` |
-| Omni Flash (compositing) | `gemini-2.0-flash-001` |
-| Gemini Live (voice) | `models/gemini-2.0-flash-live-001` |
+| NB2 Lite (garment/ad frames) | `gemini-3.1-flash-lite-image` |
+| Omni Flash (compositing) | `gemini-omni-flash-preview` |
+| Gemini Live (voice) | `models/gemini-3.1-flash-live-preview` |
 
 ## Known issues / demo risks
 

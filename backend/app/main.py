@@ -24,13 +24,10 @@ app = FastAPI(title="Orni Relay")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-# Model aliases confirmed against Gemini API docs (June 2025).
-# Image generation (garment layer + ad frames): gemini-2.0-flash-preview-image-generation
-# Multimodal compositing: gemini-2.0-flash-preview-image-generation (supports image in+out)
-# Live voice: gemini-2.0-flash-live-001
-_NB2_LITE_MODEL = "gemini-2.0-flash-preview-image-generation"
-_OMNI_FLASH_MODEL = "gemini-2.0-flash-preview-image-generation"
-_LIVE_MODEL = "gemini-2.0-flash-live-001"
+# Model aliases updated June 2025.
+_NB2_LITE_MODEL = "gemini-3.1-flash-lite-image"
+_OMNI_FLASH_MODEL = "gemini-omni-flash-preview"
+_LIVE_MODEL = "gemini-3.1-flash-live-preview"
 
 _EPHEMERAL_TOKEN_TTL_SECONDS = 60 * 10  # 10 minutes
 
@@ -70,7 +67,7 @@ class GenerateGarmentResponse(BaseModel):
 
 @app.post("/generate-garment", response_model=GenerateGarmentResponse)
 def generate_garment(request: GenerateGarmentRequest) -> GenerateGarmentResponse:
-    """Generate a garment layer via NB2 Lite (gemini-2.0-flash-preview-image-generation).
+    """Generate a garment layer via NB2 Lite (gemini-3.1-flash-lite-image).
 
     Returns a transparent-background PNG of the garment with any text/logos
     rendered precisely, ready to be composited by Omni Flash.

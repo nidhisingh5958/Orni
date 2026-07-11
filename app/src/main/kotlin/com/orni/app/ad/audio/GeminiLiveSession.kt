@@ -227,7 +227,7 @@ class GeminiLiveSession(private val websocketUrl: String, private val token: Str
 
     companion object {
         private const val TAG = "GeminiLiveSession"
-        private const val MODEL = "models/gemini-2.0-flash-live-001"
+        private const val MODEL = "models/gemini-3.1-flash-live-preview"
         private val INTERRUPT_WORDS = listOf("wait", "no,", "actually", "stop", "change that", "hold on")
         private val INTERRUPT_WORDS_HIGH = listOf("really", "very", "super", "bold", "dramatic", "epic", "flashier")
         private val INTERRUPT_WORDS_LOW  = listOf("subtle", "minimal", "calm", "soft", "gentle", "clean")

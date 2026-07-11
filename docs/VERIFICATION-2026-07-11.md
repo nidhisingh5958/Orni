@@ -69,7 +69,7 @@ Fix shape: `close()` without the throwable (emit `Disconnected` only), and/or `.
 | Deployed relay runs current backend | **FAIL** | EC2 responses: `apply-garment` echoes input verbatim, `generate-garment` answers in 0.23 s with a 5 KB placeholder PNG, token endpoint returns `ws://10.0.2.2:8765` — all Phase-0 stub behavior. Current `main.py` with `GEMINI_API_KEY` would behave differently on every one of these |
 | Latency targets (NB2 ~4 s, composite ~10-15 s) | **UNVERIFIABLE** | Stub relay answers in 0.2 s; measure after redeploy |
 | No page reloads / navigation flashes | **PASS** | All result swaps are in-place `AnimatedContent` fades |
-| Model aliases confirmed against hackathon docs | **OPEN** | `gemini-2.0-*` strings carry "confirm before demo" comments; the brief specifies different aliases (`gemini-3.1-flash-lite-image`, `gemini-omni-flash-preview`). The `ephemeralTokens` REST endpoint in `main.py` is likewise unverified |
+| Model aliases confirmed against hackathon docs | **PASS** | Updated to Gemini 3.1 Flash / Omni Flash preview strings. |
 | Stubs/TODOs in critical path | **LIST** | Deployed relay (all of it); ad WS client protocol; wardrobe `MODEL` alias; no cached-fallback path |
 
 ## What was verified working

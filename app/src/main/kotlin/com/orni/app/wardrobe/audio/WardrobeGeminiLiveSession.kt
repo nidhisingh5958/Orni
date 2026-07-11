@@ -17,7 +17,7 @@ import org.json.JSONObject
 /**
  * Gemini Live WebSocket session for the wardrobe feature.
  *
- * Wire protocol: gemini-2.0-flash-live-001 (BidiGenerateContent).
+ * Wire protocol: gemini-3.1-flash-live-preview (BidiGenerateContent).
  *   - On open  → send BidiGenerateContentSetup with model + system prompt
  *   - Audio    → BidiGenerateContentRealtimeInput (inline base64 PCM)
  *   - Receive  → BidiGenerateContentServerContent; extract text parts as JSON intent
@@ -201,7 +201,7 @@ class WardrobeGeminiLiveSession(
     companion object {
         private const val TAG = "WardrobeGeminiLive"
         // Confirmed against Gemini API docs (June 2025).
-        private const val MODEL = "models/gemini-2.0-flash-live-001"
+        private const val MODEL = "models/gemini-3.1-flash-live-preview"
         private val SYSTEM_PROMPT = """
             You are a wardrobe assistant. The user will speak outfit change instructions.
             After each complete instruction, respond ONLY with a single JSON object — no prose, no markdown fences:
