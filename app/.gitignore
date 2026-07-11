@@ -1,0 +1,11 @@
+build/
+.gradle/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.dex
+*.class
+
+

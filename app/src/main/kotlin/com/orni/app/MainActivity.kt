@@ -4,9 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Surface
-import androidx.compose.ui.Modifier
 import com.orni.app.ui.theme.OrniTheme
 import com.orni.app.wardrobe.ui.WardrobeTryOnScreen
 
@@ -16,9 +13,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             OrniTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    WardrobeTryOnScreen()
-                }
+                WardrobeTryOnScreen()
             }
         }
     }
