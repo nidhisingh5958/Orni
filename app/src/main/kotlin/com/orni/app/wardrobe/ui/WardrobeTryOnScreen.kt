@@ -38,6 +38,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
@@ -49,6 +51,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +68,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -80,9 +85,29 @@ fun WardrobeTryOnScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val selectedPhotoUri by viewModel.selectedPhotoUri.collectAsState()
+    val amplitude by viewModel.amplitude.collectAsState()
     var description by remember { mutableStateOf("") }
+    var micPermissionGranted by remember { mutableStateOf(false) }
 
     val isBusy = uiState is WardrobeUiState.GeneratingGarment || uiState is WardrobeUiState.ApplyingGarment
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> micPermissionGranted = granted }
+
+    // Request mic permission on first composition
+    LaunchedEffect(Unit) {
+        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
+    // Start/stop voice session based on permission
+    LaunchedEffect(micPermissionGranted) {
+        if (micPermissionGranted) viewModel.startVoiceSession()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.stopVoiceSession() }
+    }
 
     val pickPhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -113,6 +138,10 @@ fun WardrobeTryOnScreen(
                 text = "orni",
                 style = MaterialTheme.typography.headlineSmall,
                 color = if (selectedPhotoUri != null) Color.White else MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            MicStatusIndicator(
+                isLive = micPermissionGranted && uiState !is WardrobeUiState.Error,
             )
         }
 
@@ -145,6 +174,31 @@ fun WardrobeTryOnScreen(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // Phase 0 proof: live transcript strip — shows raw transcribed text
+            // before any garment logic is wired in.
+            val transcript = when (val s = uiState) {
+                is WardrobeUiState.IntentStabilizing -> s.transcript
+                is WardrobeUiState.GeneratingGarment -> "Generating garment…"
+                is WardrobeUiState.ApplyingGarment -> "Applying to photo…"
+                else -> null
+            }
+            AnimatedVisibility(visible = transcript != null) {
+                Text(
+                    text = transcript.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = description,
@@ -208,6 +262,34 @@ fun WardrobeTryOnScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MicStatusIndicator(isLive: Boolean) {
+    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "alpha",
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isLive) Color(0xFF4CAF50).copy(alpha = pulse)
+                    else MaterialTheme.colorScheme.error
+                ),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+            if (isLive) Icons.Filled.Mic else Icons.Filled.MicOff,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (isLive) Color.White else MaterialTheme.colorScheme.error,
+        )
     }
 }
 
@@ -288,7 +370,8 @@ private fun WardrobePreview(
                     }
                 }
 
-                is WardrobeUiState.Error, WardrobeUiState.Idle -> {
+                is WardrobeUiState.Error, WardrobeUiState.Idle,
+                WardrobeUiState.Listening, is WardrobeUiState.IntentStabilizing -> {
                     if (selectedPhotoUri != null) {
                         AsyncImage(
                             model = selectedPhotoUri,

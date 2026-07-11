@@ -1,11 +1,18 @@
 package com.orni.app.wardrobe.network
 
+import com.orni.app.ad.network.AdRepository
+import com.orni.app.ad.network.dto.EphemeralTokenResponse
 import com.orni.app.wardrobe.network.dto.ApplyGarmentRequest
 import com.orni.app.wardrobe.network.dto.GenerateGarmentRequest
 
 class WardrobeRepository(
     private val api: WardrobeApiService = NetworkModule.wardrobeApi,
+    // Reuse the ad relay's ephemeral-token endpoint — it's model-agnostic.
+    private val adRepository: AdRepository = AdRepository(),
 ) {
+
+    suspend fun mintEphemeralToken(): Result<EphemeralTokenResponse> =
+        adRepository.mintEphemeralToken()
 
     suspend fun generateGarment(description: String): Result<String> = runCatching {
         api.generateGarment(GenerateGarmentRequest(description = description)).garmentImageBase64
