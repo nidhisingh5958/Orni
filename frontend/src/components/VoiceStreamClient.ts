@@ -8,6 +8,7 @@ export class VoiceStreamClient {
   private processor: ScriptProcessorNode | null = null;
   private accumulatedText = '';
   private isMuted = false;
+  private tempStream: MediaStream | null = null;
 
   constructor(
     private callbacks: {
@@ -32,8 +33,8 @@ export class VoiceStreamClient {
       this.socket.onopen = () => {
         console.log('[VoiceStreamClient] WebSocket connected');
         this.callbacks.onStatusChange('connected');
+        this.tempStream = existingStream || null;
         this.sendSetupFrame();
-        this.startMicrophone(existingStream);
       };
 
       this.socket.onmessage = (event) => {
@@ -93,10 +94,10 @@ export class VoiceStreamClient {
     const setupFrame = {
       setup: {
         model: 'models/gemini-3.1-flash-live-preview',
-        generationConfig: {
-          responseModalities: ['TEXT']
+        generation_config: {
+          response_modalities: ['AUDIO']
         },
-        systemInstruction: {
+        system_instruction: {
           parts: [{
             text: `You are the core intent-parser AI of VoiceCanvas AI. The user describes their creative intent for ad campaigns.
 Your output must be a single, strict JSON object matching one of the following shapes:
@@ -118,7 +119,9 @@ Rules:
 - Do not output any chat dialog, markdown formatting, backticks, or introductions.
 - Just output the raw JSON string.`
           }]
-        }
+        },
+        output_audio_transcription: {},
+        input_audio_transcription: {}
       }
     };
 
@@ -191,6 +194,13 @@ Rules:
   private handleMessage(event: MessageEvent): void {
     try {
       const msg = JSON.parse(event.data);
+
+      if (msg.setupComplete) {
+        console.log('[VoiceStreamClient] Setup complete received. Starting microphone...');
+        this.startMicrophone(this.tempStream);
+        this.tempStream = null;
+        return;
+      }
 
       if (msg.serverContent) {
         // Handle direct user interruptions
