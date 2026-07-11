@@ -67,7 +67,9 @@ class WardrobeViewModel(
             _uiState.value = WardrobeUiState.GeneratingGarment
             repository.generateGarment(description)
                 .onSuccess { garmentBase64 -> applyGarment(photoBase64, garmentBase64, description) }
-                .onFailure { _uiState.value = WardrobeUiState.Error(it.message ?: "Failed to generate garment") }
+                .onFailure {
+                    _uiState.value = WardrobeUiState.Error(it.toUserMessage("Failed to generate garment"))
+                }
         }
     }
 
@@ -118,7 +120,7 @@ class WardrobeViewModel(
         val tokenResult = repository.mintEphemeralToken()
         tokenResult.onFailure {
             Log.e(TAG, "Token mint failed: ${it.message}")
-            _uiState.value = WardrobeUiState.Error("Could not connect — check your network")
+            _uiState.value = WardrobeUiState.Error(it.toUserMessage("Could not connect — check your network"))
             return
         }
         val tokenData = tokenResult.getOrThrow()
@@ -230,12 +232,13 @@ class WardrobeViewModel(
                 .onSuccess { garmentBase64 -> applyGarment(photoBase64, garmentBase64, description) }
                 .onFailure {
                     Log.e(TAG, "Generation failed: ${it.message}")
-                    _uiState.value = WardrobeUiState.Error(it.message ?: "Generation failed")
+                    _uiState.value = WardrobeUiState.Error(it.toUserMessage("Generation failed"))
                 }
         }
     }
 
     private suspend fun applyGarment(photoBase64: String, garmentImageBase64: String, instruction: String) {
+        val previousState = _uiState.value
         _uiState.value = WardrobeUiState.ApplyingGarment
         repository.applyGarment(
             photoBase64 = photoBase64,
@@ -244,15 +247,27 @@ class WardrobeViewModel(
             instruction = instruction,
         ).onSuccess { (resultImageBase64, newSessionId) ->
             // Push current result onto undo stack before replacing it
-            val currentSuccess = _uiState.value as? WardrobeUiState.Success
-            if (currentSuccess != null && sessionId != null) {
+            if (previousState is WardrobeUiState.Success && sessionId != null) {
                 if (undoStack.size >= 2) undoStack.removeFirst()
-                undoStack.addLast(currentSuccess.resultImageBase64 to sessionId!!)
+                undoStack.addLast(previousState.resultImageBase64 to sessionId!!)
             }
             sessionId = newSessionId
             _uiState.value = WardrobeUiState.Success(resultImageBase64, canUndo = undoStack.isNotEmpty())
         }.onFailure {
-            _uiState.value = WardrobeUiState.Error(it.message ?: "Failed to apply garment")
+            Log.e(TAG, "Apply failed: ${it.message}")
+            _uiState.value = WardrobeUiState.Error(it.toUserMessage("Failed to apply garment"))
+        }
+    }
+
+    private fun Throwable.toUserMessage(default: String): String {
+        return when {
+            message?.contains("Unable to resolve host", ignoreCase = true) == true ->
+                "Network error: Could not reach server. Please check your internet connection."
+            message?.contains("timeout", ignoreCase = true) == true ->
+                "Connection timed out. The server might be busy, please try again."
+            message?.contains("Failed to connect", ignoreCase = true) == true ->
+                "Could not connect to the wardrobe service. Please try again later."
+            else -> message ?: default
         }
     }
 
