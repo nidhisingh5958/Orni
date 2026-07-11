@@ -1,11 +1,13 @@
 import React, { useRef, useEffect } from 'react';
 
 interface CanvasProps {
-  imageSrc?: string; // Base64 image
-  videoSrc?: string; // Base64 video
+  imageSrc?: string; // Base64 image fallback
+  videoSrc?: string; // Base64 video fallback
   textOverlay?: string;
   isShimmering?: boolean;
   cameraStream?: MediaStream | null;
+  wardrobeStyle?: 'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null;
+  activeFilter?: 'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -13,7 +15,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   videoSrc,
   textOverlay,
   isShimmering,
-  cameraStream
+  cameraStream,
+  wardrobeStyle,
+  activeFilter
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -51,7 +55,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       const video = videoRef.current;
       video.src = videoSrc.startsWith('data:') ? videoSrc : `data:video/mp4;base64,${videoSrc}`;
       video.load();
-      video.play().catch(e => console.log('Autoplay blocked or video loading:', e));
+      video.play().catch(e => console.log('Video autoplay blocked or loading:', e));
     } else {
       if (videoRef.current) {
         videoRef.current.pause();
@@ -84,60 +88,360 @@ export const Canvas: React.FC<CanvasProps> = ({
     const draw = () => {
       if (!isDrawing) return;
 
-      // Clear canvas context
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (videoRef.current && videoRef.current.readyState >= 2) {
-        // Draw video frames natively onto canvas
+      // 1. Draw Background Backdrop
+      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
+        // Draw the full webcam stream on the canvas
+        ctx.drawImage(cameraVideoRef.current, 0, 0, canvas.width, canvas.height);
+      } else if (videoRef.current && videoRef.current.readyState >= 2) {
+        // Fallback video asset loop
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       } else if (imgLoaded) {
-        // Draw static image creative
+        // Fallback static image asset
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       } else {
-        // Premium default gradient background
+        // Premium default gradient backdrop
         const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        grad.addColorStop(0, '#0f172a'); // deep slate blue
+        grad.addColorStop(0, '#0f172a');
         grad.addColorStop(1, '#1e293b');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Centered instruction copy
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '22px Inter, sans-serif';
+        // Centered helper copy
+        ctx.fillStyle = '#475569';
+        ctx.font = '20px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Press "Start Speech" and speak to generate ad creative...', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('Awaiting camera stream permission...', canvas.width / 2, canvas.height / 2);
       }
 
-      // Draw bottom banner text overlay
+      // 2. Draw Body Alignment Calibration Outlines
+      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)'; // glowing cyan guide
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 6]);
+
+        // Circular head guide
+        ctx.beginPath();
+        ctx.arc(512, 330, 95, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Shoulder slopes guide
+        ctx.beginPath();
+        ctx.moveTo(280, 680);
+        ctx.quadraticCurveTo(390, 500, 415, 430);
+        ctx.lineTo(609, 430);
+        ctx.quadraticCurveTo(634, 500, 744, 680);
+        ctx.stroke();
+
+        ctx.setLineDash([]); // Reset line dashes
+      }
+
+      // 3. Draw Digital Wardrobe Try-On Overlays
+      if (wardrobeStyle) {
+        if (wardrobeStyle === 'old-money') {
+          // Luxury Linen Cream Blazer with Gold Amber Trims
+          ctx.fillStyle = 'rgba(248, 250, 252, 0.95)'; // linen cream
+          ctx.strokeStyle = '#b45309'; // gold/amber trims
+          ctx.lineWidth = 4;
+
+          // Main blazer body
+          ctx.beginPath();
+          ctx.moveTo(270, 700);
+          ctx.quadraticCurveTo(390, 500, 415, 430);
+          ctx.lineTo(609, 430);
+          ctx.quadraticCurveTo(634, 500, 754, 700);
+          ctx.lineTo(620, 960);
+          ctx.lineTo(404, 960);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Contrast Lapels (V shape cut)
+          ctx.fillStyle = '#0f172a'; // dark lapels
+          ctx.beginPath();
+          ctx.moveTo(512, 630);
+          ctx.lineTo(415, 430);
+          ctx.lineTo(470, 430);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(512, 630);
+          ctx.lineTo(609, 430);
+          ctx.lineTo(554, 430);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Gold pocket square detail
+          ctx.fillStyle = '#b45309';
+          ctx.fillRect(430, 520, 40, 15);
+
+          // Double breasted gold buttons
+          ctx.fillStyle = '#fbbf24';
+          ctx.beginPath();
+          ctx.arc(480, 680, 8, 0, Math.PI * 2);
+          ctx.arc(544, 680, 8, 0, Math.PI * 2);
+          ctx.arc(480, 760, 8, 0, Math.PI * 2);
+          ctx.arc(544, 760, 8, 0, Math.PI * 2);
+          ctx.fill();
+
+        } else if (wardrobeStyle === 'space-suit') {
+          // Futuristic cyber astronaut chest plates
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+          ctx.strokeStyle = '#06b6d4'; // glowing neon cyan
+          ctx.lineWidth = 4;
+
+          // Armor shoulders
+          ctx.beginPath();
+          ctx.moveTo(250, 710);
+          ctx.lineTo(395, 470);
+          ctx.lineTo(629, 470);
+          ctx.lineTo(774, 710);
+          ctx.lineTo(640, 960);
+          ctx.lineTo(384, 960);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Circular chest glow core
+          ctx.save();
+          ctx.shadowColor = '#06b6d4';
+          ctx.shadowBlur = 20;
+          ctx.fillStyle = '#22d3ee';
+          ctx.beginPath();
+          ctx.arc(512, 600, 38, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          // Futuristic collar bracket
+          ctx.fillStyle = '#334155';
+          ctx.fillRect(452, 470, 120, 25);
+
+          // Neon decals
+          ctx.strokeStyle = '#22d3ee';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(310, 630);
+          ctx.lineTo(395, 490);
+          ctx.moveTo(714, 630);
+          ctx.lineTo(629, 490);
+          ctx.stroke();
+
+        } else if (wardrobeStyle === 'cyberpunk') {
+          // Neon Indigo/Pink high-collar jacket
+          ctx.fillStyle = '#1e1b4b'; // deep purple/indigo
+          ctx.strokeStyle = '#d946ef'; // glowing neon magenta
+          ctx.lineWidth = 4;
+
+          // High fold collars
+          ctx.beginPath();
+          ctx.moveTo(415, 440);
+          ctx.lineTo(370, 360);
+          ctx.lineTo(460, 410);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(609, 440);
+          ctx.lineTo(654, 360);
+          ctx.lineTo(564, 410);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Main body jacket shape
+          ctx.beginPath();
+          ctx.moveTo(260, 700);
+          ctx.quadraticCurveTo(390, 500, 415, 440);
+          ctx.lineTo(609, 440);
+          ctx.quadraticCurveTo(634, 500, 764, 700);
+          ctx.lineTo(620, 960);
+          ctx.lineTo(404, 960);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Cyan neon contrast lining
+          ctx.strokeStyle = '#3b82f6'; // glowing electric blue
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(512, 440);
+          ctx.lineTo(512, 700);
+          ctx.stroke();
+
+        } else if (wardrobeStyle === 'tactical-armor') {
+          // Military combat heavy tactical vest
+          ctx.fillStyle = '#1c1917'; // tactical stone
+          ctx.strokeStyle = '#84cc16'; // lime green trim
+          ctx.lineWidth = 4;
+
+          // Base plate
+          ctx.beginPath();
+          ctx.moveTo(300, 710);
+          ctx.lineTo(385, 460);
+          ctx.lineTo(639, 460);
+          ctx.lineTo(724, 710);
+          ctx.lineTo(610, 960);
+          ctx.lineTo(414, 960);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Tactical pockets
+          ctx.fillStyle = '#292524';
+          ctx.fillRect(380, 550, 90, 80);
+          ctx.fillRect(554, 550, 90, 80);
+          ctx.fillRect(465, 660, 94, 70);
+
+          // Buckles
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillRect(420, 490, 24, 12);
+          ctx.fillRect(580, 490, 24, 12);
+        }
+      }
+
+      // 4. Draw Cinematic Filter/HUD Overlay
+      if (activeFilter) {
+        if (activeFilter === 'cinematic') {
+          // Top & Bottom Cinematic Letterbox bars
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, 120);
+          ctx.fillRect(0, canvas.height - 120, canvas.width, 120);
+
+          // Film grain noise particles
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
+          for (let i = 0; i < 250; i++) {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            ctx.fillRect(x, y, 2, 2);
+          }
+
+          // Widescreen HUD markers
+          ctx.fillStyle = '#f1f5f9';
+          ctx.font = '500 16px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText('REC ● 24 FPS', 40, 80);
+
+          ctx.textAlign = 'right';
+          ctx.fillText('CINEMATIC 2.39:1', canvas.width - 40, 80);
+
+        } else if (activeFilter === 'sci-fi') {
+          // Glowing diagnostic grid HUD overlay
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.35)'; // cyan line
+          ctx.lineWidth = 2;
+
+          // Telemetry corner brackets
+          const bracket = 50;
+          const offset = 30;
+
+          // Top Left
+          ctx.beginPath();
+          ctx.moveTo(offset, offset + bracket);
+          ctx.lineTo(offset, offset);
+          ctx.lineTo(offset + bracket, offset);
+          ctx.stroke();
+
+          // Top Right
+          ctx.beginPath();
+          ctx.moveTo(canvas.width - offset, offset + bracket);
+          ctx.lineTo(canvas.width - offset, offset);
+          ctx.lineTo(canvas.width - offset - bracket, offset);
+          ctx.stroke();
+
+          // Bottom Left
+          ctx.beginPath();
+          ctx.moveTo(offset, canvas.height - offset - bracket);
+          ctx.lineTo(offset, canvas.height - offset);
+          ctx.lineTo(offset + bracket, canvas.height - offset);
+          ctx.stroke();
+
+          // Bottom Right
+          ctx.beginPath();
+          ctx.moveTo(canvas.width - offset, canvas.height - offset - bracket);
+          ctx.lineTo(canvas.width - offset, canvas.height - offset);
+          ctx.lineTo(canvas.width - offset - bracket, canvas.height - offset);
+          ctx.stroke();
+
+          // Target reticle circular crosshairs
+          ctx.beginPath();
+          ctx.arc(512, 512, 110, 0, Math.PI * 2);
+          ctx.moveTo(512, 380);
+          ctx.lineTo(512, 410);
+          ctx.moveTo(512, 614);
+          ctx.lineTo(512, 644);
+          ctx.moveTo(380, 512);
+          ctx.lineTo(410, 512);
+          ctx.moveTo(614, 512);
+          ctx.lineTo(644, 512);
+          ctx.stroke();
+
+          // Digital readout stats
+          ctx.fillStyle = '#22d3ee';
+          ctx.font = '14px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText('SYSTEM OK // LINK STATE STATUS: 1', offset + 20, offset + 90);
+          ctx.fillText('LATENCY: SECURE HIGH RELAY', offset + 20, offset + 110);
+          ctx.fillText('VIRTUAL MIRROR LOCK: ON', offset + 20, offset + 130);
+
+        } else if (activeFilter === 'war') {
+          // Warm Orange Sepia Tone Tint overlay
+          ctx.fillStyle = 'rgba(180, 83, 9, 0.16)'; // Amber sepia tint
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Simulated film scratches
+          ctx.strokeStyle = 'rgba(12, 10, 9, 0.3)';
+          ctx.lineWidth = 1.5;
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            const startX = Math.random() * canvas.width;
+            ctx.moveTo(startX, 0);
+            ctx.lineTo(startX + (Math.random() * 30 - 15), canvas.height);
+            ctx.stroke();
+          }
+
+          // Heavy Vignette Border Shade
+          const vign = ctx.createRadialGradient(512, 512, 450, 512, 512, 750);
+          vign.addColorStop(0, 'rgba(0,0,0,0)');
+          vign.addColorStop(1, 'rgba(0,0,0,0.8)');
+          ctx.fillStyle = vign;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Combat feed text
+          ctx.fillStyle = '#b45309';
+          ctx.font = '700 16px monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText('WAR ROOM BATTLE FEED', canvas.width - 40, 60);
+
+        } else if (activeFilter === 'cyberpunk') {
+          // Translucent Pink Tint overlay
+          ctx.fillStyle = 'rgba(217, 70, 239, 0.08)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Horizontal digital scanlines
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+          for (let y = 0; y < canvas.height; y += 6) {
+            ctx.fillRect(0, y, canvas.width, 2);
+          }
+
+          // Random neon digital glitches
+          if (Math.random() > 0.82) {
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.35)'; // cyan/green neon glitched block
+            ctx.fillRect(Math.random() * (canvas.width - 250), Math.random() * (canvas.height - 50), 250, 30);
+          }
+        }
+      }
+
+      // 5. Draw Bottom Text Banner Overlay
       if (textOverlay) {
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
         ctx.fillRect(0, canvas.height - 110, canvas.width, 110);
 
         ctx.fillStyle = '#f8fafc';
-        ctx.font = '600 26px Inter, sans-serif';
+        ctx.font = '600 24px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(textOverlay, canvas.width / 2, canvas.height - 55);
-      }
-
-      // Draw Live camera stream Picture-in-Picture Circle Inset
-      if (cameraVideoRef.current && cameraVideoRef.current.readyState >= 2) {
-        ctx.save();
-        ctx.beginPath();
-        // Circular PIP path: x=canvas.width - 120, y=120, radius=90
-        ctx.arc(canvas.width - 120, 120, 90, 0, Math.PI * 2, true);
-        ctx.closePath();
-        ctx.clip();
-
-        // Crop & Draw the camera frame inside the circular clip area
-        ctx.drawImage(cameraVideoRef.current, canvas.width - 240, 30, 240, 180);
-        ctx.restore();
-
-        // Draw border ring for the camera PIP
-        ctx.strokeStyle = '#6366f1';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.arc(canvas.width - 120, 120, 90, 0, Math.PI * 2, true);
-        ctx.stroke();
       }
 
       animationId = requestAnimationFrame(draw);
@@ -156,7 +460,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         cameraVideoRef.current.srcObject = null;
       }
     };
-  }, [imageSrc, videoSrc, textOverlay, cameraStream]);
+  }, [imageSrc, videoSrc, textOverlay, cameraStream, wardrobeStyle, activeFilter]);
 
   return (
     <div className="canvas-container">
