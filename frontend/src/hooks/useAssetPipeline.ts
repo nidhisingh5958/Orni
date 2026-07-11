@@ -16,6 +16,16 @@ export function useAssetPipeline() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const cancelActiveRequest = useCallback(() => {
+    if (abortControllerRef.current) {
+      console.log('[useAssetPipeline] Aborting active request');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsGenerating(false);
+    setGenerationMessage('Request cancelled by user interruption.');
+  }, []);
+
   const runVirtualTryon = useCallback(async (prompt: string, frameBytes: string, clothBytes?: string) => {
     cancelActiveRequest();
 
@@ -46,16 +56,6 @@ export function useAssetPipeline() {
       }
     }
   }, [cancelActiveRequest]);
-
-  const cancelActiveRequest = useCallback(() => {
-    if (abortControllerRef.current) {
-      console.log('[useAssetPipeline] Aborting active request');
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsGenerating(false);
-    setGenerationMessage('Request cancelled by user interruption.');
-  }, []);
 
   const handleIntent = useCallback(async (intent: ParsedIntent) => {
     // 1. Interruption handling: Cancel any in-flight requests immediately
