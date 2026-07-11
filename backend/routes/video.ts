@@ -1,18 +1,19 @@
 /**
  * video.ts — VoiceCanvas AI Video Generation Routes
  *
- * This file handles the two-step video generation flow:
- *   1. /video/session — Seeds a "session" for a given asset by storing the prompt context.
- *      Uses generateContent with responseModalities:["IMAGE"] to create a still frame
- *      representing the opening visual of the video scene.
- *   2. /video/turn — Given an existing assetId + a new prompt, calls generateContent to
- *      generate an updated visual frame from the new prompt, simulating a video turn.
+ * Uses a multi-step fallback chain for maximum reliability:
  *
- * IMPORTANT: ai.interactions.create is the Antigravity agent runtime API.
- * It is NOT for calling Gemini image/video models. All generative calls MUST use
- * ai.models.generateContent with the correct model and responseModalities config.
+ * VIDEO GENERATION CASCADE:
+ *   1. Veo 2 (veo-2.0-generate-001) — Actual MP4 video output, paid tier, async polling
+ *   2. Imagen 3 (imagen-3.0-generate-002) — High-quality cinematic still frame, paid tier
+ *   3. Gemini 2.0 Flash Exp — Experimental still frame via IMAGE modality
+ *   4. Static placeholder — Never crashes
  *
- * All errors fall back gracefully — the frontend always gets a response, never a raw 400/500.
+ * /video/session  — Seeds the session context for an asset (stores prompt metadata).
+ * /video/turn     — Executes a generation turn using the full cascade.
+ *
+ * IMPORTANT: ai.interactions.create is the Antigravity agent runtime API, NOT for image/video generation.
+ * All media generation uses ai.models.generateContent, ai.models.generateImages, ai.models.generateVideos.
  */
 
 import { Router } from 'express';
@@ -22,17 +23,127 @@ import { env } from '../config/env';
 
 export const videoRouter = Router();
 
-// Minimal fallback 1x1 transparent PNG base64 (used when all generation fails)
+// Fallback 1x1 transparent PNG
 const FALLBACK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN88B8AAugB2uUkHn0AAAAASUVORK5CYII=';
 
-/**
- * POST /api/video/session
- * Seeds a video session for an asset by generating a cinematic still frame from an image + prompt.
- * This pre-warms the session store so subsequent /video/turn calls can reference the assetId.
- *
- * Body: { assetId: string, imageBytes: string (base64 PNG), prompt?: string }
- * Returns: { success: boolean, sessionId: string, videoBytes: string | null }
- */
+// ─────────────────────────────────────────────────────────────
+// HELPER: Tier 1 — Veo 2 (real MP4 video via async polling)
+// ─────────────────────────────────────────────────────────────
+async function tryVeo2(prompt: string): Promise<{ data: string; isVideo: true } | null> {
+  try {
+    console.log(`[Veo2] Starting video generation: "${prompt}"`);
+
+    let operation = await (ai.models as any).generateVideos({
+      model: env.VEO_MODEL,
+      prompt: `Cinematic, photorealistic, high-quality video: ${prompt}. Dramatic lighting, smooth camera movement, professional cinematography.`,
+      config: {
+        numberOfVideos: 1,
+        durationSeconds: 5,
+        aspectRatio: '16:9'
+      }
+    });
+
+    // Poll until done or timeout
+    const deadline = Date.now() + env.VEO_TIMEOUT_MS;
+    while (!operation.done) {
+      if (Date.now() > deadline) {
+        throw new Error(`Veo 2 timed out after ${env.VEO_TIMEOUT_MS / 1000}s`);
+      }
+      console.log('[Veo2] Polling... waiting 4s');
+      await new Promise(r => setTimeout(r, 4000));
+      operation = await (ai.operations as any).getVideosOperation({
+        operation: { name: operation.name }
+      });
+    }
+
+    const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+    if (!videoUri) throw new Error('No video URI in Veo 2 response');
+
+    console.log(`[Veo2] Video ready at: ${videoUri}`);
+
+    // Fetch video bytes from the CDN URI
+    const fetchResponse = await fetch(videoUri, {
+      headers: { 'Authorization': `Bearer ${env.GEMINI_API_KEY}` }
+    });
+    if (!fetchResponse.ok) {
+      // Try without auth header (public CDN URL)
+      const publicResponse = await fetch(videoUri);
+      if (!publicResponse.ok) throw new Error(`Failed to fetch video bytes: ${publicResponse.status}`);
+      const videoBuffer = await publicResponse.arrayBuffer();
+      console.log('[Veo2] ✅ Video fetched successfully (public URL)');
+      return { data: Buffer.from(videoBuffer).toString('base64'), isVideo: true };
+    }
+
+    const videoBuffer = await fetchResponse.arrayBuffer();
+    console.log('[Veo2] ✅ Video fetched successfully');
+    return { data: Buffer.from(videoBuffer).toString('base64'), isVideo: true };
+  } catch (err: any) {
+    console.warn(`[Veo2] ❌ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// HELPER: Tier 2 — Imagen 3 (cinematic still frame)
+// ─────────────────────────────────────────────────────────────
+async function tryImagen3Still(prompt: string): Promise<{ data: string; isVideo: false } | null> {
+  try {
+    console.log(`[Imagen3] Generating cinematic still: "${prompt}"`);
+    const response = await (ai.models as any).generateImages({
+      model: env.IMAGEN_MODEL,
+      prompt: `Cinematic still frame from a blockbuster film: ${prompt}. Ultra-detailed, dramatic lighting, professional color grading, anamorphic lens aesthetic. 16:9 wide aspect.`,
+      config: {
+        numberOfImages: 1,
+        outputMimeType: 'image/jpeg',
+        aspectRatio: '16:9'
+      }
+    });
+    const imageBytes = response?.generatedImages?.[0]?.image?.imageBytes;
+    if (!imageBytes) throw new Error('No imageBytes in Imagen 3 response');
+    console.log('[Imagen3] ✅ Cinematic still generated');
+    const data = typeof imageBytes === 'string'
+      ? imageBytes
+      : Buffer.from(imageBytes as any).toString('base64');
+    return { data, isVideo: false };
+  } catch (err: any) {
+    console.warn(`[Imagen3] ❌ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// HELPER: Tier 3 — Gemini 2.0 Flash Exp (still via IMAGE modality)
+// ─────────────────────────────────────────────────────────────
+async function tryGeminiExpStill(prompt: string): Promise<{ data: string; isVideo: false } | null> {
+  try {
+    console.log(`[GeminiExp] Generating still frame: "${prompt}"`);
+    const response = await ai.models.generateContent({
+      model: env.GEMINI_EXP_IMAGE_MODEL,
+      contents: [{
+        role: 'user',
+        parts: [{
+          text: `Create a cinematic, photorealistic still frame for this scene: "${prompt}". Apply dramatic lighting, professional color grading, movie-quality composition.`
+        }]
+      }],
+      config: { responseModalities: ['IMAGE'] }
+    });
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const imgPart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+    if (!imgPart?.inlineData?.data) throw new Error('No image data in Gemini Exp response');
+    console.log('[GeminiExp] ✅ Still frame generated');
+    return { data: imgPart.inlineData.data as string, isVideo: false };
+  } catch (err: any) {
+    console.warn(`[GeminiExp] ❌ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/video/session
+// Seeds a visual session for an asset. Pre-generates a cinematic
+// still frame from the provided image to pre-warm the asset context.
+// Body: { assetId, imageBytes (base64 PNG), prompt? }
+// ─────────────────────────────────────────────────────────────
 videoRouter.post('/video/session', async (req, res) => {
   const { assetId, imageBytes, prompt } = req.body;
 
@@ -40,73 +151,35 @@ videoRouter.post('/video/session', async (req, res) => {
     return res.status(400).json({ error: 'assetId and imageBytes are required' });
   }
 
-  try {
-    console.log(`[video/session] Seeding visual session for asset: ${assetId}`);
+  console.log(`[video/session] Seeding session for asset: ${assetId}`);
 
-    const videoPrompt = prompt || 'Generate a cinematic, high-quality scene image inspired by this photo. Apply dramatic lighting, vibrant color grading, and a cinematic wide-angle aesthetic.';
+  // Seed the session store immediately
+  const sessionId = `session_${assetId}_${Date.now()}`;
+  sessionStore.setSession(assetId, sessionId);
 
-    // Use generateContent with IMAGE modality to create a styled still frame
-    const response = await ai.models.generateContent({
-      model: env.OMNI_FLASH_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                mimeType: 'image/png',
-                data: imageBytes
-              }
-            },
-            { text: videoPrompt }
-          ]
-        }
-      ],
-      config: {
-        responseModalities: ['IMAGE']
-      }
-    });
+  const sessionPrompt = prompt || 'Generate a breathtaking cinematic scene from this photo. Apply dramatic lighting and vivid colors.';
 
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+  // Tier 2: Imagen 3 still (no need for Veo in pre-warm)
+  let result = await tryImagen3Still(sessionPrompt);
 
-    // Store a synthetic session ID (timestamp-based) in the session store
-    const sessionId = `session_${assetId}_${Date.now()}`;
-    sessionStore.setSession(assetId, sessionId);
+  // Tier 3: Gemini Exp
+  if (!result) result = await tryGeminiExpStill(sessionPrompt);
 
-    console.log(`[video/session] Session seeded: ${sessionId}, image found: ${!!imagePart}`);
+  console.log(`[video/session] Session ${sessionId} seeded. Image: ${!!result}`);
 
-    res.json({
-      success: true,
-      sessionId,
-      videoBytes: imagePart?.inlineData?.data || null
-    });
-  } catch (err: any) {
-    console.error('[video/session] Generation failed, returning fallback:', err.message);
-
-    // Store fallback session so /video/turn still has an assetId to work with
-    const fallbackSessionId = `fallback_${assetId}_${Date.now()}`;
-    sessionStore.setSession(assetId, fallbackSessionId);
-
-    res.json({
-      success: false,
-      sessionId: fallbackSessionId,
-      videoBytes: null,
-      errorMsg: err.message || 'Failed to seed video session',
-      isFallback: true
-    });
-  }
+  res.json({
+    success: true,
+    sessionId,
+    videoBytes: result?.data || null,
+    isVideo: false
+  });
 });
 
-/**
- * POST /api/video/turn
- * Executes a video generation turn for an existing assetId.
- * Calls generateContent with IMAGE modality using the user's new prompt.
- * If no session exists for the assetId, seeds one dynamically first.
- *
- * Body: { assetId: string, prompt: string }
- * Returns: { success: boolean, videoBytes: string | null, sessionId: string }
- */
+// ─────────────────────────────────────────────────────────────
+// POST /api/video/turn
+// Full generation cascade: Veo 2 → Imagen 3 → Gemini Exp → Placeholder
+// Body: { assetId, prompt }
+// ─────────────────────────────────────────────────────────────
 videoRouter.post('/video/turn', async (req, res) => {
   const { assetId, prompt } = req.body;
 
@@ -114,59 +187,57 @@ videoRouter.post('/video/turn', async (req, res) => {
     return res.status(400).json({ error: 'assetId and prompt are required' });
   }
 
-  // Ensure a session exists — seed one dynamically if not
+  // Ensure a session exists
   if (!sessionStore.getSession(assetId)) {
-    console.log(`[video/turn] No active session for ${assetId}, creating one dynamically...`);
-    const dynamicSessionId = `dynamic_${assetId}_${Date.now()}`;
-    sessionStore.setSession(assetId, dynamicSessionId);
+    sessionStore.setSession(assetId, `dynamic_${assetId}_${Date.now()}`);
   }
 
-  try {
-    console.log(`[video/turn] Generating visual for asset: ${assetId}, prompt: "${prompt}"`);
+  console.log(`[video/turn] Generating for asset: ${assetId}, prompt: "${prompt}"`);
 
-    // Generate a styled cinematic image from the text prompt
-    const response = await ai.models.generateContent({
-      model: env.OMNI_FLASH_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `Create a cinematic, photorealistic, ultra high-quality visual for this scene: "${prompt}". 
-              Apply dramatic lighting, professional color grading, and movie-quality composition. 
-              The image should feel like a still frame from a blockbuster film.`
-            }
-          ]
-        }
-      ],
-      config: {
-        responseModalities: ['IMAGE']
-      }
-    });
-
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
-
-    // Update session ID
-    const newSessionId = `turn_${assetId}_${Date.now()}`;
-    sessionStore.setSession(assetId, newSessionId);
-
-    console.log(`[video/turn] Turn complete. Image generated: ${!!imagePart}`);
-
-    res.json({
+  // ── Tier 1: Veo 2 (real MP4 video) ──
+  const veoResult = await tryVeo2(prompt);
+  if (veoResult) {
+    sessionStore.setSession(assetId, `veo_${assetId}_${Date.now()}`);
+    return res.json({
       success: true,
-      sessionId: newSessionId,
-      videoBytes: imagePart?.inlineData?.data || null
-    });
-  } catch (err: any) {
-    console.error('[video/turn] Generation failed, returning fallback:', err.message);
-
-    res.json({
-      success: false,
-      sessionId: `error_${assetId}_${Date.now()}`,
-      videoBytes: null,
-      errorMsg: err.message || 'Failed to generate video turn',
-      isFallback: true
+      sessionId: `veo_${assetId}_${Date.now()}`,
+      videoBytes: veoResult.data,
+      isVideo: true
     });
   }
+
+  // ── Tier 2: Imagen 3 (cinematic still) ──
+  const imagenResult = await tryImagen3Still(prompt);
+  if (imagenResult) {
+    sessionStore.setSession(assetId, `imagen_${assetId}_${Date.now()}`);
+    return res.json({
+      success: true,
+      sessionId: `imagen_${assetId}_${Date.now()}`,
+      videoBytes: imagenResult.data,
+      isVideo: false
+    });
+  }
+
+  // ── Tier 3: Gemini 2.0 Flash Exp (still frame) ──
+  const expResult = await tryGeminiExpStill(prompt);
+  if (expResult) {
+    sessionStore.setSession(assetId, `exp_${assetId}_${Date.now()}`);
+    return res.json({
+      success: true,
+      sessionId: `exp_${assetId}_${Date.now()}`,
+      videoBytes: expResult.data,
+      isVideo: false
+    });
+  }
+
+  // ── Tier 4: Static placeholder (silent fallback) ──
+  console.error('[video/turn] All tiers exhausted, returning placeholder');
+  res.json({
+    success: false,
+    sessionId: `placeholder_${assetId}_${Date.now()}`,
+    videoBytes: null,
+    isVideo: false,
+    errorMsg: 'All video generation models temporarily unavailable',
+    isFallback: true
+  });
 });

@@ -13,6 +13,7 @@ export interface VideoResponse {
   videoBytes: string | null;
   errorMsg?: string;
   isFallback?: boolean;
+  isVideo?: boolean; // true = MP4 from Veo, false = PNG/JPEG still frame
 }
 
 export interface TtsResponse {

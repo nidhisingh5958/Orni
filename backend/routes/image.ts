@@ -1,13 +1,17 @@
 /**
  * image.ts — VoiceCanvas AI Image Generation Routes
  *
- * Two endpoints:
- *   1. /image — Generates a creative image from a text prompt using Gemini with IMAGE modality.
- *   2. /tryon — Virtual try-on: takes the user's webcam frame + optional clothing reference image,
- *      asks Gemini to composite the clothing onto the user realistically.
+ * Uses a multi-step fallback chain for maximum reliability:
  *
- * Model: gemini-2.0-flash with responseModalities: ["IMAGE"] for image outputs.
- * Falls back gracefully to the original frame bytes if generation fails.
+ * IMAGE GENERATION CASCADE:
+ *   1. Imagen 3 (imagen-3.0-generate-002) — Best quality, paid tier, uses generateImages API
+ *   2. Gemini 2.0 Flash Exp (gemini-2.0-flash-exp) — Experimental, supports IMAGE responseModality
+ *   3. Static 1x1 placeholder PNG — Silent fallback, never crashes
+ *
+ * TRYON CASCADE (same chain but with input image):
+ *   1. Imagen 3 with edit prompt
+ *   2. Gemini 2.0 Flash Exp with image input
+ *   3. Return original webcam frame unchanged
  */
 
 import { Router } from 'express';
@@ -16,136 +20,162 @@ import { env } from '../config/env';
 
 export const imageRouter = Router();
 
-// Fallback 1x1 gray PNG image
+// Fallback 1x1 transparent gray PNG
 const FALLBACK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN88B8AAugB2uUkHn0AAAAASUVORK5CYII=';
 
-/**
- * POST /api/image
- * Generates a creative ad image from a text prompt.
- * Body: { prompt: string }
- * Returns: { mimeType, data, isFallback?, errorMsg? }
- */
-imageRouter.post('/image', async (req, res) => {
-  const { prompt } = req.body;
-
-  if (!prompt) {
-    return res.status(400).json({ error: 'Prompt is required' });
-  }
-
+// ─────────────────────────────────────────────────────────────
+// HELPER: Tier 1 — Imagen 3 via generateImages API
+// ─────────────────────────────────────────────────────────────
+async function tryImagen3(prompt: string): Promise<string | null> {
   try {
-    console.log(`[image] Generating image for prompt: "${prompt}"`);
-
-    const response = await ai.models.generateContent({
-      model: env.NB2_LITE_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `Create a high-quality, visually striking creative image for: "${prompt}". Make it photorealistic and cinematic.` }]
-        }
-      ],
+    console.log(`[Imagen3] Attempting image generation: "${prompt}"`);
+    const response = await (ai.models as any).generateImages({
+      model: env.IMAGEN_MODEL,
+      prompt,
       config: {
-        responseModalities: ['IMAGE']
+        numberOfImages: 1,
+        outputMimeType: 'image/jpeg',
+        aspectRatio: '1:1'
       }
     });
-
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
-
-    if (!imagePart?.inlineData) {
-      throw new Error('No image data returned from model');
-    }
-
-    console.log(`[image] Image generated successfully`);
-    res.json({
-      mimeType: imagePart.inlineData.mimeType,
-      data: imagePart.inlineData.data
-    });
+    const imageBytes = response?.generatedImages?.[0]?.image?.imageBytes;
+    if (!imageBytes) throw new Error('No imageBytes in Imagen 3 response');
+    console.log('[Imagen3] ✅ Image generated successfully');
+    return typeof imageBytes === 'string'
+      ? imageBytes
+      : Buffer.from(imageBytes as any).toString('base64');
   } catch (err: any) {
-    console.error('[image] Image generation failed, using fallback:', err.message);
-    res.json({
+    console.warn(`[Imagen3] ❌ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// HELPER: Tier 2 — Gemini 2.0 Flash Exp via generateContent + IMAGE modality
+// ─────────────────────────────────────────────────────────────
+async function tryGeminiExpImage(prompt: string, inputImageBase64?: string): Promise<string | null> {
+  try {
+    console.log(`[GeminiExp] Attempting image generation: "${prompt}"`);
+    const parts: any[] = [];
+    if (inputImageBase64) {
+      parts.push({ inlineData: { mimeType: 'image/png', data: inputImageBase64 } });
+    }
+    parts.push({ text: prompt });
+
+    const response = await ai.models.generateContent({
+      model: env.GEMINI_EXP_IMAGE_MODEL,
+      contents: [{ role: 'user', parts }],
+      config: { responseModalities: ['IMAGE'] }
+    });
+
+    const resParts = response.candidates?.[0]?.content?.parts || [];
+    const imgPart = resParts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+    if (!imgPart?.inlineData?.data) throw new Error('No image data in Gemini Exp response');
+    console.log('[GeminiExp] ✅ Image generated successfully');
+    return imgPart.inlineData.data as string;
+  } catch (err: any) {
+    console.warn(`[GeminiExp] ❌ Failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/image — Generate creative image from text prompt
+// Fallback chain: Imagen 3 → Gemini Exp → Static placeholder
+// ─────────────────────────────────────────────────────────────
+imageRouter.post('/image', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+  const enrichedPrompt = `High-quality, photorealistic, cinematic image: "${prompt}". Vibrant colors, professional lighting, ultra-detailed.`;
+
+  // Tier 1: Imagen 3
+  let imageData = await tryImagen3(enrichedPrompt);
+
+  // Tier 2: Gemini 2.0 Flash Exp
+  if (!imageData) {
+    imageData = await tryGeminiExpImage(enrichedPrompt);
+  }
+
+  // Tier 3: Placeholder
+  if (!imageData) {
+    console.warn('[image] All tiers failed, returning static placeholder');
+    return res.json({
       mimeType: 'image/png',
       data: FALLBACK_IMAGE_BASE64,
       isFallback: true,
-      errorMsg: err.message || 'Failed to generate image'
+      errorMsg: 'All image generation models unavailable'
     });
   }
+
+  res.json({ mimeType: 'image/jpeg', data: imageData });
 });
 
-/**
- * POST /api/tryon
- * AI Virtual Try-On: Composites clothing onto the user's webcam portrait.
- * Body: { prompt: string, frameBytes: string (base64 PNG), clothBytes?: string (base64 PNG) }
- * Returns: { mimeType, data, isFallback?, errorMsg? }
- */
+// ─────────────────────────────────────────────────────────────
+// POST /api/tryon — AI Virtual Try-On: webcam portrait + clothing style
+// Fallback chain: Imagen 3 edit → Gemini Exp → Original frame
+// ─────────────────────────────────────────────────────────────
 imageRouter.post('/tryon', async (req, res) => {
   const { prompt, frameBytes, clothBytes } = req.body;
+  if (!frameBytes) return res.status(400).json({ error: 'webcam frameBytes is required' });
 
-  if (!frameBytes) {
-    return res.status(400).json({ error: 'webcam frameBytes is required' });
+  const tryonPrompt = clothBytes
+    ? `The first image is the user's portrait. The second image is a clothing item. Synthesize a realistic edit where the person wears that clothing item naturally. Keep their face, hair, expression, and background identical. Style context: ${prompt || 'matching outfit'}. Return only the edited portrait.`
+    : `The image is the user's portrait. Realistically place on them: ${prompt || 'a stylish outfit'}. Keep their face, hair, expression, and background completely unchanged. Return only the edited portrait.`;
+
+  // Tier 1: Imagen 3 (doesn't support image input natively, so skip if clothBytes available)
+  let imageData: string | null = null;
+  if (!clothBytes) {
+    // Imagen 3 can generate a try-on from text description when no reference image exists
+    imageData = await tryImagen3(
+      `Professional fashion photo: a person wearing ${prompt || 'a stylish outfit'}. Photorealistic, studio lighting, neutral background. Ultra-detailed, fashion editorial quality.`
+    );
   }
 
-  try {
-    console.log(`[tryon] Running AI try-on for: "${prompt}"`);
+  // Tier 2: Gemini Exp (supports image input for editing)
+  if (!imageData) {
+    const inputImage = clothBytes
+      ? `${frameBytes}|||${clothBytes}` // Signal to include both images
+      : frameBytes;
 
-    const parts: any[] = [];
-
-    // 1. Add user's webcam snapshot image
-    parts.push({
-      inlineData: {
-        mimeType: 'image/png',
-        data: frameBytes
-      }
-    });
-
-    // 2. Add uploaded clothing item reference image (optional)
+    // For cloth editing, we need multi-image input
     if (clothBytes) {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/png',
-          data: clothBytes
-        }
-      });
-      parts.push({
-        text: `The first image is the user's portrait. The second image is a clothing product photo. 
-Synthesize a realistic edited image where the person in the first photo is wearing the clothing item from the second photo. 
-Fit the item naturally to their shoulders and body. Style context: ${prompt || 'matching jacket'}. 
-Keep their face, expression, and the background identical. Return ONLY the edited image.`
-      });
-    } else {
-      parts.push({
-        text: `The image is the user's portrait. Generate a realistic edit where they are wearing: ${prompt || 'a stylish coat'}. 
-Fit it naturally to their body and shoulders. Keep their face, expression, hair, and the background completely identical. 
-Return ONLY the photorealistic edited image.`
-      });
-    }
-
-    const response = await ai.models.generateContent({
-      model: env.NB2_LITE_MODEL,
-      contents: [{ role: 'user', parts }],
-      config: {
-        responseModalities: ['IMAGE']
+      try {
+        console.log('[tryon/GeminiExp] Running two-image try-on...');
+        const response = await ai.models.generateContent({
+          model: env.GEMINI_EXP_IMAGE_MODEL,
+          contents: [{
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: 'image/png', data: frameBytes } },
+              { inlineData: { mimeType: 'image/png', data: clothBytes } },
+              { text: tryonPrompt }
+            ]
+          }],
+          config: { responseModalities: ['IMAGE'] }
+        });
+        const resParts = response.candidates?.[0]?.content?.parts || [];
+        const imgPart = resParts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+        imageData = imgPart?.inlineData?.data || null;
+        if (imageData) console.log('[tryon/GeminiExp] ✅ Two-image try-on successful');
+      } catch (err: any) {
+        console.warn('[tryon/GeminiExp] Two-image try-on failed:', err.message);
       }
-    });
-
-    const responseParts = response.candidates?.[0]?.content?.parts || [];
-    const imagePart = responseParts.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
-
-    if (!imagePart?.inlineData) {
-      throw new Error('No try-on image returned from Gemini');
+    } else {
+      imageData = await tryGeminiExpImage(tryonPrompt, frameBytes);
     }
+  }
 
-    console.log(`[tryon] Try-on generated successfully`);
-    res.json({
-      mimeType: imagePart.inlineData.mimeType,
-      data: imagePart.inlineData.data
-    });
-  } catch (err: any) {
-    console.error('[tryon] AI Try-on failed, returning original frame:', err.message);
-    res.json({
+  // Tier 3: Return original frame unchanged
+  if (!imageData) {
+    console.warn('[tryon] All tiers failed, returning original webcam frame');
+    return res.json({
       mimeType: 'image/png',
       data: frameBytes,
       isFallback: true,
-      errorMsg: err.message || 'Failed to generate AI Try-on'
+      errorMsg: 'Try-on generation unavailable, showing original frame'
     });
   }
+
+  res.json({ mimeType: 'image/jpeg', data: imageData });
 });

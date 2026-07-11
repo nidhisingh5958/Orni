@@ -26,7 +26,8 @@ export default function App() {
     setErrorMsg,
     tryonImageSrc,
     setTryonImageSrc,
-    runVirtualTryon
+    runVirtualTryon,
+    isVideoOutput
   } = useAssetPipeline();
 
   // Flagship UI Layout States
@@ -41,6 +42,8 @@ export default function App() {
   // Dynamic mirror overlays
   const [wardrobeStyle, setWardrobeStyle] = useState<'old-money' | 'space-suit' | 'cyberpunk' | 'tactical-armor' | null>(null);
   const [activeFilter, setActiveFilter] = useState<'cinematic' | 'sci-fi' | 'war' | 'cyberpunk' | null>(null);
+  // Track whether videoSrc is a real video (Veo MP4) or a still image (Imagen/Gemini)
+  const [isVideoOutput, setIsVideoOutput] = useState(false);
 
   // Connect Theme state to document element attributes
   useEffect(() => {
@@ -346,19 +349,33 @@ export default function App() {
           
           <div className="video-player-container">
             {videoSrc ? (
-              // The video turn API returns base64 image data (PNG cinematic still frames)
-              // We render it as an image with a CSS Ken Burns animation to simulate motion
-              <img
-                src={`data:image/png;base64,${videoSrc}`}
-                alt="AI Generated Cinematic Frame"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  borderRadius: '0.75rem',
-                  animation: 'kenBurns 8s ease-in-out infinite alternate'
-                }}
-              />
+              isVideoOutput ? (
+                // Veo 2 returned a real MP4 — render as looping video
+                <video
+                  key={videoSrc.slice(0, 20)}
+                  src={`data:video/mp4;base64,${videoSrc}`}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  controls
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '0.75rem' }}
+                />
+              ) : (
+                // Imagen 3 / Gemini Exp returned a still frame — render with Ken Burns motion
+                <img
+                  key={videoSrc.slice(0, 20)}
+                  src={`data:image/jpeg;base64,${videoSrc}`}
+                  alt="AI Generated Cinematic Frame"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    borderRadius: '0.75rem',
+                    animation: 'kenBurns 8s ease-in-out infinite alternate'
+                  }}
+                />
+              )
             ) : (
               <div className="video-placeholder-text">
                 <p style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📹</p>

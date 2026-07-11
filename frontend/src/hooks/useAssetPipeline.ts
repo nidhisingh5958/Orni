@@ -13,6 +13,7 @@ export function useAssetPipeline() {
   const [latency, setLatency] = useState<number | undefined>(undefined);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [tryonImageSrc, setTryonImageSrc] = useState<string | null>(null);
+  const [isVideoOutput, setIsVideoOutput] = useState(false); // true = real Veo MP4
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -120,6 +121,7 @@ export function useAssetPipeline() {
 
         if (result.videoBytes) {
           setVideoSrc(result.videoBytes);
+          setIsVideoOutput(!!result.isVideo);
         }
         setIsGenerating(false);
         setLatency(Date.now() - startTime);
@@ -146,6 +148,7 @@ export function useAssetPipeline() {
 
         if (videoResult.videoBytes) {
           setVideoSrc(videoResult.videoBytes);
+          setIsVideoOutput(!!videoResult.isVideo);
         }
 
         if (ttsResult && ttsResult.audioBytes) {
@@ -214,6 +217,7 @@ export function useAssetPipeline() {
     setErrorMsg,
     tryonImageSrc,
     setTryonImageSrc,
-    runVirtualTryon
+    runVirtualTryon,
+    isVideoOutput
   };
 }
