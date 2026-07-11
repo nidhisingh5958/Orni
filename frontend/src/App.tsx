@@ -346,13 +346,18 @@ export default function App() {
           
           <div className="video-player-container">
             {videoSrc ? (
-              <video
-                src={`data:video/mp4;base64,${videoSrc}`}
-                autoPlay
-                loop
-                muted
-                playsInline
-                controls
+              // The video turn API returns base64 image data (PNG cinematic still frames)
+              // We render it as an image with a CSS Ken Burns animation to simulate motion
+              <img
+                src={`data:image/png;base64,${videoSrc}`}
+                alt="AI Generated Cinematic Frame"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '0.75rem',
+                  animation: 'kenBurns 8s ease-in-out infinite alternate'
+                }}
               />
             ) : (
               <div className="video-placeholder-text">
